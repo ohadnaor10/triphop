@@ -288,6 +288,41 @@ export function getCountryBoundary(isoCode: string): GeoJSON.Feature<BoundaryGeo
   return getCountryBoundaries().get(isoCode);
 }
 
+let regionBoundaries: Map<Region, GeoJSON.Feature<GeoJSON.MultiPolygon>> | null = null;
+
+// A region ("East Asia/SE Asia", ...) is this app's own multi-country grouping, not a
+// real admin area with its own boundary data — so its shape is built by merging every
+// member country's real polygon into one MultiPolygon, the same geometry already used
+// to draw individual countries.
+function getRegionBoundaries(): Map<Region, GeoJSON.Feature<GeoJSON.MultiPolygon>> {
+  if (!regionBoundaries) {
+    regionBoundaries = new Map();
+    const polygonsByRegion = new Map<Region, GeoJSON.Position[][][]>();
+    for (const [isoCode, region] of Object.entries(ISO_TO_REGION)) {
+      const boundary = getCountryBoundary(isoCode);
+      if (!boundary) continue;
+      const parts =
+        boundary.geometry.type === "Polygon" ? [boundary.geometry.coordinates] : boundary.geometry.coordinates;
+      const existing = polygonsByRegion.get(region) ?? [];
+      polygonsByRegion.set(region, [...existing, ...parts]);
+    }
+    for (const [region, coordinates] of polygonsByRegion) {
+      if (coordinates.length === 0) continue;
+      regionBoundaries.set(region, {
+        type: "Feature",
+        properties: {},
+        geometry: { type: "MultiPolygon", coordinates },
+      });
+    }
+  }
+  return regionBoundaries;
+}
+
+/** Real boundary polygon for a broad region, built from its member countries' shapes. */
+export function getRegionBoundary(region: Region): GeoJSON.Feature<GeoJSON.MultiPolygon> | undefined {
+  return getRegionBoundaries().get(region);
+}
+
 export type GeoCountry = {
   name: string;
   isoCode: string;

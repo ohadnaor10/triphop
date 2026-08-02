@@ -5,7 +5,7 @@ import turfCircle from "@turf/circle";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef } from "react";
-import { getCountryBoundary } from "../lib/geo";
+import { getCountryBoundary, getRegionBoundary, type Region } from "../lib/geo";
 
 export type DestinationPoint = {
   name: string;
@@ -41,15 +41,19 @@ function localRadiusKm(point: DestinationPoint): number {
 // Real (simplified) administrative boundary polygon from world-atlas when we have one
 // for this country; otherwise fall back to a circle so we still render *something*
 // closer to a real footprint than a rectangle. Broad regions ("East Asia/SE Asia", ...)
-// have no boundary data at all — they're this app's own multi-country groupings, not a
-// real admin area — so they always get a large area circle instead of a pin.
+// have no boundary data of their own — they're this app's own multi-country groupings —
+// so they use the real shape built by merging their member countries' polygons instead.
 function toCountryFeature(point: DestinationPoint): NamedFeature {
-  const boundary = point.countryCode ? getCountryBoundary(point.countryCode) : undefined;
+  const boundary =
+    point.tier === "region"
+      ? getRegionBoundary(point.name as Region)
+      : point.countryCode
+        ? getCountryBoundary(point.countryCode)
+        : undefined;
   if (boundary) {
     return { ...boundary, properties: { name: point.name } } as NamedFeature;
   }
-  const radiusKm = point.tier === "region" ? 900 : localRadiusKm(point) * 4;
-  const circle = turfCircle([point.lng, point.lat], radiusKm, {
+  const circle = turfCircle([point.lng, point.lat], localRadiusKm(point) * 4, {
     steps: 64,
     units: "kilometers",
   });
