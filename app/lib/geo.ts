@@ -2,6 +2,7 @@ import turfArea from "@turf/area";
 import turfBbox from "@turf/bbox";
 import turfCentroid from "@turf/centroid";
 import turfDistance from "@turf/distance";
+import turfUnion from "@turf/union";
 import { City, Country } from "country-state-city";
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
@@ -288,38 +289,53 @@ export function getCountryBoundary(isoCode: string): GeoJSON.Feature<BoundaryGeo
   return getCountryBoundaries().get(isoCode);
 }
 
-let regionBoundaries: Map<Region, GeoJSON.Feature<GeoJSON.MultiPolygon>> | null = null;
+let regionBoundaries: Map<Region, GeoJSON.Feature<BoundaryGeometry>> | null = null;
 
 // A region ("East Asia/SE Asia", ...) is this app's own multi-country grouping, not a
-// real admin area with its own boundary data — so its shape is built by merging every
-// member country's real polygon into one MultiPolygon, the same geometry already used
-// to draw individual countries.
-function getRegionBoundaries(): Map<Region, GeoJSON.Feature<GeoJSON.MultiPolygon>> {
+// real admin area with its own boundary data — so its shape is built by dissolving every
+// member country's real polygon (the same geometry already used to draw individual
+// countries) into one seamless shape, rather than a collection with internal borders.
+function getRegionBoundaries(): Map<Region, GeoJSON.Feature<BoundaryGeometry>> {
   if (!regionBoundaries) {
     regionBoundaries = new Map();
-    const polygonsByRegion = new Map<Region, GeoJSON.Position[][][]>();
+    const featuresByRegion = new Map<Region, GeoJSON.Feature<BoundaryGeometry>[]>();
     for (const [isoCode, region] of Object.entries(ISO_TO_REGION)) {
       const boundary = getCountryBoundary(isoCode);
       if (!boundary) continue;
-      const parts =
-        boundary.geometry.type === "Polygon" ? [boundary.geometry.coordinates] : boundary.geometry.coordinates;
-      const existing = polygonsByRegion.get(region) ?? [];
-      polygonsByRegion.set(region, [...existing, ...parts]);
+      const existing = featuresByRegion.get(region) ?? [];
+      featuresByRegion.set(region, [...existing, boundary]);
     }
-    for (const [region, coordinates] of polygonsByRegion) {
-      if (coordinates.length === 0) continue;
-      regionBoundaries.set(region, {
-        type: "Feature",
-        properties: {},
-        geometry: { type: "MultiPolygon", coordinates },
-      });
+    for (const [region, features] of featuresByRegion) {
+      if (features.length === 0) continue;
+      if (features.length === 1) {
+        regionBoundaries.set(region, features[0]);
+        continue;
+      }
+      try {
+        const dissolved = turfUnion({ type: "FeatureCollection", features });
+        if (dissolved) regionBoundaries.set(region, dissolved);
+      } catch {
+        // A handful of simplified 1:50m polygons can be topologically invalid enough to
+        // make union() throw — fall back to the pre-dissolve behavior (still real
+        // geometry, just with member-country borders visible) rather than no shape at all.
+        regionBoundaries.set(region, {
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "MultiPolygon",
+            coordinates: features.flatMap((f) =>
+              f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates,
+            ),
+          },
+        });
+      }
     }
   }
   return regionBoundaries;
 }
 
-/** Real boundary polygon for a broad region, built from its member countries' shapes. */
-export function getRegionBoundary(region: Region): GeoJSON.Feature<GeoJSON.MultiPolygon> | undefined {
+/** Real boundary polygon for a broad region, dissolved from its member countries' shapes. */
+export function getRegionBoundary(region: Region): GeoJSON.Feature<BoundaryGeometry> | undefined {
   return getRegionBoundaries().get(region);
 }
 
