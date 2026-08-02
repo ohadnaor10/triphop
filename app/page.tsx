@@ -300,6 +300,11 @@ async function getDestinationPoints(destinations: Destination[]): Promise<GeoPoi
       const queries = destinationQueries(destination);
       return Promise.all(
         queries.map(async ({ name, query, tier, countryCode }) => {
+          // Broad regions are this app's own taxonomy buckets (e.g. "East Asia/SE Asia"),
+          // not real place names — geocoding them against a live places API just returns
+          // whatever fuzzy-matches the text (which can land anywhere on the globe), so
+          // always use the curated centroid instead.
+          if (destination.mode === "broad") return staticFallbackPoint(destination, name, tier);
           const geocoded = await geocodePlace(query);
           if (geocoded) return { name, tier, countryCode, ...geocoded };
           return staticFallbackPoint(destination, name, tier);
