@@ -11,6 +11,7 @@ import {
   IconMap,
   IconMapPin,
   IconPlus,
+  IconSliders,
   IconUser,
   IconWhatsApp,
   IconX,
@@ -475,7 +476,12 @@ export default function HomePage() {
   const [tripMapPoints, setTripMapPoints] = useState<GeoPoint[]>([]);
   const [savedPostIds, setSavedPostIds] = useState<Set<string>>(new Set());
   const [showSavedOnly, setShowSavedOnly] = useState(false);
-  const [openHeroField, setOpenHeroField] = useState<"destination" | "dates" | "traveler" | null>(null);
+  const [openHeroField, setOpenHeroField] = useState<"destination" | "dates" | "filters" | null>(null);
+  // Whether the user has performed their first search yet — gates the full-screen,
+  // centered destination/dates prompt (see below) that replaces the feed on first run,
+  // so a first-time visitor sees an inviting, focused "what do I search for" moment
+  // instead of a wall of posts with no context.
+  const [hasSearched, setHasSearched] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -803,6 +809,253 @@ export default function HomePage() {
     setIsModalOpen(false);
   }
 
+  // Destination/dates trigger buttons + their dropdown panels are shared between the
+  // compact sticky-header search bar (shown once the user has searched) and the large,
+  // centered first-run prompt (shown before that) — same behavior, different sizing, so
+  // the two surfaces can't drift apart. Plain functions (not components) so calling them
+  // inline doesn't remount the DOM/reset focus on every render.
+  function renderDestinationTrigger(size: "sm" | "lg") {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpenHeroField(openHeroField === "destination" ? null : "destination")}
+        className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left transition ${
+          size === "lg"
+            ? "border-b border-slate-100 px-4 py-4 sm:border-b-0 sm:border-r"
+            : "border-r border-slate-100 px-3 py-2.5"
+        } ${openHeroField === "destination" ? "bg-orange-50" : "bg-white hover:bg-slate-50"}`}
+      >
+        <span
+          className={`flex items-center gap-1 font-semibold uppercase tracking-wide text-slate-400 ${size === "lg" ? "text-xs" : "text-[10px]"}`}
+        >
+          <IconMapPin className={size === "lg" ? "h-3.5 w-3.5" : "h-3 w-3"} />
+          Destination
+        </span>
+        <span className={`w-full truncate font-semibold text-slate-900 ${size === "lg" ? "text-base" : "text-sm"}`}>
+          {selectedDestinations.length === 0 ? "Anywhere" : selectedDestinations.map((d) => d.name).join(" + ")}
+        </span>
+      </button>
+    );
+  }
+
+  function renderDatesTrigger(size: "sm" | "lg") {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          if (openHeroField !== "dates") setDateSearchDraft(appliedDateSearch ?? EMPTY_DATE_SEARCH);
+          setOpenHeroField(openHeroField === "dates" ? null : "dates");
+        }}
+        className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left transition ${
+          size === "lg" ? "px-4 py-4" : "px-3 py-2.5"
+        } ${openHeroField === "dates" ? "bg-orange-50" : "bg-white hover:bg-slate-50"}`}
+      >
+        <span
+          className={`flex items-center gap-1 font-semibold uppercase tracking-wide text-slate-400 ${size === "lg" ? "text-xs" : "text-[10px]"}`}
+        >
+          <IconCalendar className={size === "lg" ? "h-3.5 w-3.5" : "h-3 w-3"} />
+          Dates
+        </span>
+        <span className={`w-full truncate font-semibold text-slate-900 ${size === "lg" ? "text-base" : "text-sm"}`}>
+          {getDateSearchLabel(appliedDateSearch)}
+        </span>
+      </button>
+    );
+  }
+
+  function renderDestinationPanel() {
+    if (openHeroField !== "destination") return null;
+    return (
+      <div className="absolute inset-x-4 z-50 mt-2 max-h-80 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
+        {selectedDestinations.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {selectedDestinations.map((d) => (
+              <span
+                key={destinationKey(d)}
+                className="flex items-center gap-1 rounded-full bg-orange-500 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white"
+              >
+                {d.name}
+                <button
+                  type="button"
+                  onClick={() => toggleSelectedDestination(d)}
+                  aria-label={`Remove ${d.name}`}
+                  className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-orange-600"
+                >
+                  <IconX className="h-2.5 w-2.5" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <input
+          type="text"
+          autoFocus
+          value={destinationQuery}
+          onChange={(e) => setDestinationQuery(e.target.value)}
+          placeholder="Search continents, regions, countries, cities…"
+          className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+        />
+
+        {destinationResults.countries.length === 0 &&
+          destinationResults.regions.length === 0 &&
+          destinationResults.cities.length === 0 &&
+          destinationResults.places.length === 0 && (
+            <p className="px-2 py-2 text-xs text-slate-400">No matches found</p>
+          )}
+
+        {(
+          [
+            { key: "countries", label: "Countries", items: destinationResults.countries },
+            { key: "regions", label: "Continents / Regions", items: destinationResults.regions },
+            { key: "cities", label: "Cities / Specific Destinations", items: destinationResults.cities },
+            { key: "places", label: "Natural Features & Places", items: destinationResults.places },
+          ] as const
+        ).map(
+          ({ key, label, items }) =>
+            items.length > 0 && (
+              <div key={key}>
+                <p className="mt-2 px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  {label}
+                </p>
+                {items.map((d) => (
+                  <button
+                    key={destinationKey(d)}
+                    type="button"
+                    onClick={() => toggleSelectedDestination(d)}
+                    className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition ${
+                      selectedDestinations.some((s) => destinationKey(s) === destinationKey(d))
+                        ? "bg-orange-50 font-semibold text-orange-600"
+                        : "text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {d.name}
+                    {d.type === "city" ? `, ${d.countryName}` : ""}
+                  </button>
+                ))}
+              </div>
+            ),
+        )}
+
+        <button
+          type="button"
+          onClick={() => {
+            setHasSearched(true);
+            setOpenHeroField(null);
+          }}
+          className="mt-2 w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition active:scale-[0.98]"
+        >
+          Done
+        </button>
+      </div>
+    );
+  }
+
+  function renderDatesPanel() {
+    if (openHeroField !== "dates") return null;
+    return (
+      <div className="absolute inset-x-4 z-50 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+        <div className="flex gap-1 border-b border-slate-100 p-1.5">
+          <button
+            type="button"
+            onClick={() => setDateSearchDraft((d) => ({ ...d, mode: "specific" }))}
+            className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              dateSearchDraft.mode === "specific" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
+            }`}
+          >
+            Specific Dates
+          </button>
+          <button
+            type="button"
+            onClick={() => setDateSearchDraft((d) => ({ ...d, mode: "flexible" }))}
+            className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              dateSearchDraft.mode === "flexible" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
+            }`}
+          >
+            Flexible Dates
+          </button>
+        </div>
+
+        <div className="max-h-72 overflow-y-auto p-3">
+          {dateSearchDraft.mode === "specific" ? (
+            <CalendarRangePicker
+              startDate={dateSearchDraft.startDate}
+              endDate={dateSearchDraft.endDate}
+              onChange={(range) => {
+                const next = { ...dateSearchDraft, ...range };
+                setDateSearchDraft(next);
+                if (range.startDate && range.endDate) {
+                  setAppliedDateSearch(next);
+                  setHasSearched(true);
+                  setOpenHeroField(null);
+                }
+              }}
+            />
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap gap-1.5">
+                {monthOptions.map((month) => (
+                  <button
+                    key={month}
+                    type="button"
+                    onClick={() =>
+                      setDateSearchDraft((d) => ({
+                        ...d,
+                        months: d.months.includes(month) ? d.months.filter((m) => m !== month) : [...d.months, month],
+                      }))
+                    }
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition ${
+                      dateSearchDraft.months.includes(month)
+                        ? "bg-orange-500 text-white ring-orange-500"
+                        : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    {formatMonth(month)}
+                  </button>
+                ))}
+              </div>
+              <DurationInput
+                value={dateSearchDraft.duration}
+                onChange={(duration) => setDateSearchDraft((d) => ({ ...d, duration }))}
+                label="Optional: trip duration"
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 border-t border-slate-100 p-3">
+          <button
+            type="button"
+            onClick={() => {
+              setDateSearchDraft(EMPTY_DATE_SEARCH);
+              setAppliedDateSearch(null);
+              setHasSearched(true);
+              setOpenHeroField(null);
+            }}
+            className="flex-1 rounded-xl bg-slate-100 py-2 text-xs font-semibold text-slate-700 transition active:bg-slate-200"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const hasContent =
+                dateSearchDraft.mode === "specific"
+                  ? Boolean(dateSearchDraft.startDate && dateSearchDraft.endDate)
+                  : dateSearchDraft.months.length > 0;
+              setAppliedDateSearch(hasContent ? dateSearchDraft : null);
+              setHasSearched(true);
+              setOpenHeroField(null);
+            }}
+            className="flex-1 rounded-xl bg-orange-500 py-2 text-xs font-semibold text-white transition active:scale-[0.98] active:bg-orange-600"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-dvh bg-slate-50 text-slate-900">
       {/* Top Navigation Bar */}
@@ -862,318 +1115,133 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Hero Search */}
-        <div ref={heroRef} className="relative mx-auto max-w-lg px-4 pb-3">
-          <div className="flex items-stretch overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setOpenHeroField(openHeroField === "destination" ? null : "destination")}
-              className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 border-r border-slate-100 px-3 py-2.5 text-left transition ${
-                openHeroField === "destination" ? "bg-orange-50" : "bg-white hover:bg-slate-50"
-              }`}
-            >
-              <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                <IconMapPin className="h-3 w-3" />
-                Destination
-              </span>
-              <span className="w-full truncate text-sm font-semibold text-slate-900">
-                {selectedDestinations.length === 0 ? "Anywhere" : selectedDestinations.map((d) => d.name).join(" + ")}
-              </span>
-            </button>
+        {hasSearched && (
+          <>
+            {/* Hero Search */}
+            <div ref={heroRef} className="relative mx-auto max-w-lg px-4 pb-3">
+              <div className="flex items-stretch gap-2">
+                <div className="flex flex-1 items-stretch overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+                  {renderDestinationTrigger("sm")}
+                  {renderDatesTrigger("sm")}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOpenHeroField(openHeroField === "filters" ? null : "filters")}
+                  aria-label="More filters"
+                  className={`flex shrink-0 items-center justify-center rounded-2xl border px-3 transition ${
+                    openHeroField === "filters"
+                      ? "border-orange-300 bg-orange-50 text-orange-600"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  <IconSliders className="h-4 w-4" />
+                </button>
+              </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                if (openHeroField !== "dates") setDateSearchDraft(appliedDateSearch ?? EMPTY_DATE_SEARCH);
-                setOpenHeroField(openHeroField === "dates" ? null : "dates");
-              }}
-              className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 border-r border-slate-100 px-3 py-2.5 text-left transition ${
-                openHeroField === "dates" ? "bg-orange-50" : "bg-white hover:bg-slate-50"
-              }`}
-            >
-              <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                <IconCalendar className="h-3 w-3" />
-                Dates
-              </span>
-              <span className="w-full truncate text-sm font-semibold text-slate-900">
-                {getDateSearchLabel(appliedDateSearch)}
-              </span>
-            </button>
+              {renderDestinationPanel()}
+              {renderDatesPanel()}
 
-            <button
-              type="button"
-              onClick={() => setOpenHeroField(openHeroField === "traveler" ? null : "traveler")}
-              className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2.5 text-left transition ${
-                openHeroField === "traveler" ? "bg-orange-50" : "bg-white hover:bg-slate-50"
-              }`}
-            >
-              <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                <IconUser className="h-3 w-3" />
-                Traveler
-              </span>
-              <span className="w-full truncate text-sm font-semibold text-slate-900">
-                {genderFilter === "All" && durationUnitFilter === "All"
-                  ? "Anyone"
-                  : [genderFilter !== "All" ? formatGender(genderFilter) : null, durationUnitFilter !== "All" ? durationUnitFilter : null]
-                      .filter(Boolean)
-                      .join(" · ")}
-              </span>
-            </button>
-          </div>
-
-          {openHeroField === "destination" && (
-            <div className="absolute inset-x-4 z-50 mt-2 max-h-80 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
-              {selectedDestinations.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  {selectedDestinations.map((d) => (
-                    <span
-                      key={destinationKey(d)}
-                      className="flex items-center gap-1 rounded-full bg-orange-500 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white"
+              {openHeroField === "filters" && (
+                <div className="absolute right-4 z-50 mt-2 flex w-56 flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">More filters</p>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-500">Gender</label>
+                    <select
+                      value={genderFilter}
+                      onChange={(e) => setGenderFilter(e.target.value as Gender | "All")}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
                     >
-                      {d.name}
-                      <button
-                        type="button"
-                        onClick={() => toggleSelectedDestination(d)}
-                        aria-label={`Remove ${d.name}`}
-                        className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-orange-600"
-                      >
-                        <IconX className="h-2.5 w-2.5" />
-                      </button>
-                    </span>
-                  ))}
+                      <option value="All">Any</option>
+                      {GENDERS.map((gender) => (
+                        <option key={gender} value={gender}>
+                          {gender}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-500">Trip duration</label>
+                    <select
+                      value={durationUnitFilter}
+                      onChange={(e) => setDurationUnitFilter(e.target.value as DurationUnit | "All")}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                    >
+                      <option value="All">Any</option>
+                      {DURATION_UNITS.map((unit) => (
+                        <option key={unit} value={unit}>
+                          {unit}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               )}
-
-              <input
-                type="text"
-                autoFocus
-                value={destinationQuery}
-                onChange={(e) => setDestinationQuery(e.target.value)}
-                placeholder="Search continents, regions, countries, cities…"
-                className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-              />
-
-              {destinationResults.countries.length === 0 &&
-                destinationResults.regions.length === 0 &&
-                destinationResults.cities.length === 0 &&
-                destinationResults.places.length === 0 && (
-                  <p className="px-2 py-2 text-xs text-slate-400">No matches found</p>
-                )}
-
-              {([
-                { key: "countries", label: "Countries", items: destinationResults.countries },
-                { key: "regions", label: "Continents / Regions", items: destinationResults.regions },
-                { key: "cities", label: "Cities / Specific Destinations", items: destinationResults.cities },
-                { key: "places", label: "Natural Features & Places", items: destinationResults.places },
-              ] as const).map(
-                ({ key, label, items }) =>
-                  items.length > 0 && (
-                    <div key={key}>
-                      <p className="mt-2 px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                        {label}
-                      </p>
-                      {items.map((d) => (
-                        <button
-                          key={destinationKey(d)}
-                          type="button"
-                          onClick={() => toggleSelectedDestination(d)}
-                          className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition ${
-                            selectedDestinations.some((s) => destinationKey(s) === destinationKey(d))
-                              ? "bg-orange-50 font-semibold text-orange-600"
-                              : "text-slate-700 hover:bg-slate-50"
-                          }`}
-                        >
-                          {d.name}
-                          {d.type === "city" ? `, ${d.countryName}` : ""}
-                        </button>
-                      ))}
-                    </div>
-                  ),
-              )}
-
-              <button
-                type="button"
-                onClick={() => setOpenHeroField(null)}
-                className="mt-2 w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition active:scale-[0.98]"
-              >
-                Done
-              </button>
             </div>
-          )}
 
-          {openHeroField === "dates" && (
-            <div className="absolute inset-x-4 z-50 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-              <div className="flex gap-1 border-b border-slate-100 p-1.5">
+            {/* Secondary filters */}
+            <div className="mx-auto max-w-lg px-4 pb-3">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 <button
                   type="button"
-                  onClick={() => setDateSearchDraft((d) => ({ ...d, mode: "specific" }))}
-                  className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
-                    dateSearchDraft.mode === "specific" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
+                  onClick={() => setVibeFilter("All")}
+                  className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
+                    vibeFilter === "All"
+                      ? "bg-slate-900 text-white ring-slate-900"
+                      : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
                   }`}
                 >
-                  Specific Dates
+                  All styles
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setDateSearchDraft((d) => ({ ...d, mode: "flexible" }))}
-                  className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
-                    dateSearchDraft.mode === "flexible" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Flexible Dates
-                </button>
-              </div>
-
-              <div className="max-h-72 overflow-y-auto p-3">
-                {dateSearchDraft.mode === "specific" ? (
-                  <CalendarRangePicker
-                    startDate={dateSearchDraft.startDate}
-                    endDate={dateSearchDraft.endDate}
-                    onChange={(range) => {
-                      const next = { ...dateSearchDraft, ...range };
-                      setDateSearchDraft(next);
-                      if (range.startDate && range.endDate) {
-                        setAppliedDateSearch(next);
-                        setOpenHeroField(null);
-                      }
-                    }}
-                  />
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-wrap gap-1.5">
-                      {monthOptions.map((month) => (
-                        <button
-                          key={month}
-                          type="button"
-                          onClick={() =>
-                            setDateSearchDraft((d) => ({
-                              ...d,
-                              months: d.months.includes(month)
-                                ? d.months.filter((m) => m !== month)
-                                : [...d.months, month],
-                            }))
-                          }
-                          className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition ${
-                            dateSearchDraft.months.includes(month)
-                              ? "bg-orange-500 text-white ring-orange-500"
-                              : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                          }`}
-                        >
-                          {formatMonth(month)}
-                        </button>
-                      ))}
-                    </div>
-                    <DurationInput
-                      value={dateSearchDraft.duration}
-                      onChange={(duration) => setDateSearchDraft((d) => ({ ...d, duration }))}
-                      label="Optional: trip duration"
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 border-t border-slate-100 p-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDateSearchDraft(EMPTY_DATE_SEARCH);
-                    setAppliedDateSearch(null);
-                    setOpenHeroField(null);
-                  }}
-                  className="flex-1 rounded-xl bg-slate-100 py-2 text-xs font-semibold text-slate-700 transition active:bg-slate-200"
-                >
-                  Clear
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const hasContent =
-                      dateSearchDraft.mode === "specific"
-                        ? Boolean(dateSearchDraft.startDate && dateSearchDraft.endDate)
-                        : dateSearchDraft.months.length > 0;
-                    setAppliedDateSearch(hasContent ? dateSearchDraft : null);
-                    setOpenHeroField(null);
-                  }}
-                  className="flex-1 rounded-xl bg-orange-500 py-2 text-xs font-semibold text-white transition active:scale-[0.98] active:bg-orange-600"
-                >
-                  Apply
-                </button>
+                {TRIP_STYLES.map((vibe) => (
+                  <button
+                    key={vibe}
+                    type="button"
+                    onClick={() => setVibeFilter(vibe)}
+                    className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
+                      vibeFilter === vibe
+                        ? "bg-slate-900 text-white ring-slate-900"
+                        : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    {vibe}
+                  </button>
+                ))}
               </div>
             </div>
-          )}
-
-          {openHeroField === "traveler" && (
-            <div className="absolute inset-x-4 z-50 mt-2 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Gender</label>
-                <select
-                  value={genderFilter}
-                  onChange={(e) => setGenderFilter(e.target.value as Gender | "All")}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-                >
-                  <option value="All">Any</option>
-                  {GENDERS.map((gender) => (
-                    <option key={gender} value={gender}>
-                      {gender}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Trip duration</label>
-                <select
-                  value={durationUnitFilter}
-                  onChange={(e) => setDurationUnitFilter(e.target.value as DurationUnit | "All")}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-                >
-                  <option value="All">Any</option>
-                  {DURATION_UNITS.map((unit) => (
-                    <option key={unit} value={unit}>
-                      {unit}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Secondary filters */}
-        <div className="mx-auto max-w-lg px-4 pb-3">
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <button
-              type="button"
-              onClick={() => setVibeFilter("All")}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
-                vibeFilter === "All"
-                  ? "bg-slate-900 text-white ring-slate-900"
-                  : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-              }`}
-            >
-              All styles
-            </button>
-            {TRIP_STYLES.map((vibe) => (
-              <button
-                key={vibe}
-                type="button"
-                onClick={() => setVibeFilter(vibe)}
-                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
-                  vibeFilter === vibe
-                    ? "bg-slate-900 text-white ring-slate-900"
-                    : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                }`}
-              >
-                {vibe}
-              </button>
-            ))}
-          </div>
-
-        </div>
+          </>
+        )}
       </header>
 
       {/* Main content */}
       <main className="mx-auto max-w-lg px-4 py-5 pb-24">
-        {view === "feed" ? (
+        {!hasSearched ? (
+          <div className="flex min-h-[70vh] flex-col items-center justify-center gap-6 text-center">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Where&apos;s your next trip?</h2>
+              <p className="mt-1.5 text-sm text-slate-500">
+                Search by destination and dates to find real travelers heading the same way — or leave both blank
+                and see everything.
+              </p>
+            </div>
+
+            <div ref={heroRef} className="relative w-full max-w-sm">
+              <div className="flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md">
+                {renderDestinationTrigger("lg")}
+                {renderDatesTrigger("lg")}
+              </div>
+              {renderDestinationPanel()}
+              {renderDatesPanel()}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setHasSearched(true)}
+              className="w-full max-w-sm rounded-2xl bg-orange-500 py-3 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-orange-600"
+            >
+              Search trips
+            </button>
+          </div>
+        ) : view === "feed" ? (
           <div className="flex flex-col gap-4">
             {filteredPosts.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-sm text-slate-500">
