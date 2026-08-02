@@ -34,7 +34,7 @@ export function MonthGrid({
           <div key={i}>{d}</div>
         ))}
       </div>
-      <div className="mt-1 grid grid-cols-7 gap-1">
+      <div className="mt-1 grid grid-cols-7 gap-1 justify-items-center">
         {cells.map((iso, i) => {
           if (!iso) return <div key={i} />;
           const isPast = iso < todayISO;

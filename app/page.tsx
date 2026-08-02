@@ -1077,12 +1077,15 @@ export default function HomePage() {
       {hasSearched && (
         <header className="sticky top-0 z-[1100] border-b border-slate-200 bg-white/95 backdrop-blur-md">
           <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
-            <h1
+            <button
+              type="button"
+              onClick={() => withViewTransition(() => setHasSearched(false))}
+              aria-label="Back to search"
               style={{ viewTransitionName: "logo" }}
-              className="text-xl font-extrabold tracking-tight text-slate-900"
+              className="text-xl font-extrabold tracking-tight text-slate-900 transition active:scale-95"
             >
               trip<span className="text-orange-500">hop</span>
-            </h1>
+            </button>
             <div className="flex items-center gap-2">
               <div className="flex items-stretch gap-0.5 rounded-full bg-slate-100 p-0.5">
                 <button
@@ -1255,10 +1258,14 @@ export default function HomePage() {
                   query={destinationQuery}
                   onQueryChange={setDestinationQuery}
                   results={destinationResults}
-                  selected={selectedDestinations}
                   destinationKey={destinationKey}
-                  onToggle={toggleSelectedDestination}
-                  onDone={() => withViewTransition(() => { setHasSearched(true); setOpenHeroField(null); })}
+                  onSelect={(dest) =>
+                    withViewTransition(() => {
+                      setSelectedDestinations([dest]);
+                      setHasSearched(true);
+                      setOpenHeroField(null);
+                    })
+                  }
                   onClose={() => setOpenHeroField(null)}
                 />
               )}

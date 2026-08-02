@@ -76,7 +76,7 @@ export default function DatePickerOverlay({
 
       <div className="flex flex-1 flex-col justify-center overflow-y-auto px-4 py-2">
         {draft.mode === "specific" ? (
-          <div className="rounded-3xl bg-white p-4 shadow-xl">
+          <div className="rounded-3xl bg-white/5 p-4 ring-1 ring-white/10">
             <HorizontalCalendarRangePicker
               startDate={draft.startDate}
               endDate={draft.endDate}

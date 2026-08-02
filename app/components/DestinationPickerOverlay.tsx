@@ -17,10 +17,8 @@ type DestinationPickerOverlayProps = {
   query: string;
   onQueryChange: (query: string) => void;
   results: DestinationResults;
-  selected: SearchDestination[];
   destinationKey: (dest: SearchDestination) => string;
-  onToggle: (dest: SearchDestination) => void;
-  onDone: () => void;
+  onSelect: (dest: SearchDestination) => void;
   onClose: () => void;
 };
 
@@ -30,23 +28,13 @@ function destinationFlag(dest: SearchDestination): string | undefined {
   return undefined;
 }
 
-function DestinationCard({
-  dest,
-  isSelected,
-  onToggle,
-}: {
-  dest: SearchDestination;
-  isSelected: boolean;
-  onToggle: () => void;
-}) {
+function DestinationCard({ dest, onSelect }: { dest: SearchDestination; onSelect: () => void }) {
   const flag = destinationFlag(dest);
   return (
     <button
       type="button"
-      onClick={onToggle}
-      className={`flex w-24 shrink-0 snap-center flex-col items-center gap-2 rounded-3xl px-2 py-4 text-center transition ${
-        isSelected ? "bg-orange-500 shadow-lg shadow-orange-500/30" : "bg-white/10 hover:bg-white/20"
-      }`}
+      onClick={onSelect}
+      className="flex w-24 shrink-0 snap-center flex-col items-center gap-2 rounded-3xl bg-white/10 px-2 py-4 text-center transition hover:bg-white/20 active:scale-95"
     >
       <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-2xl">
         {flag ?? (dest.type === "region" ? <IconGlobe className="h-6 w-6 text-white" /> : <IconMapPin className="h-6 w-6 text-white" />)}
@@ -63,10 +51,8 @@ export default function DestinationPickerOverlay({
   query,
   onQueryChange,
   results,
-  selected,
   destinationKey,
-  onToggle,
-  onDone,
+  onSelect,
   onClose,
 }: DestinationPickerOverlayProps) {
   const [visible, setVisible] = useState(false);
@@ -142,27 +128,6 @@ export default function DestinationPickerOverlay({
         </button>
       </div>
 
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-4 pb-3">
-          {selected.map((d) => (
-            <span
-              key={destinationKey(d)}
-              className="flex items-center gap-1 rounded-full bg-orange-500 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white"
-            >
-              {d.name}
-              <button
-                type="button"
-                onClick={() => onToggle(d)}
-                aria-label={`Remove ${d.name}`}
-                className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-orange-600"
-              >
-                <IconX className="h-2.5 w-2.5" />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
       <div className="flex flex-1 flex-col justify-center overflow-hidden">
         {displayItems.length === 0 ? (
           <p className="px-4 text-center text-sm text-slate-300">No matches found</p>
@@ -173,25 +138,10 @@ export default function DestinationPickerOverlay({
             className="flex snap-x snap-mandatory gap-4 overflow-x-auto px-[calc(50%-3rem)] py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {displayItems.map((d, i) => (
-              <DestinationCard
-                key={`${destinationKey(d)}-${i}`}
-                dest={d}
-                isSelected={selected.some((s) => destinationKey(s) === destinationKey(d))}
-                onToggle={() => onToggle(d)}
-              />
+              <DestinationCard key={`${destinationKey(d)}-${i}`} dest={d} onSelect={() => onSelect(d)} />
             ))}
           </div>
         )}
-      </div>
-
-      <div className="p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
-        <button
-          type="button"
-          onClick={onDone}
-          className="w-full rounded-2xl bg-orange-500 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-orange-600"
-        >
-          Done
-        </button>
       </div>
     </div>
   );
