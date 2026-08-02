@@ -12,7 +12,7 @@ export type DestinationPoint = {
   lat: number;
   lng: number;
   bbox?: [number, number, number, number];
-  tier: "country" | "local";
+  tier: "country" | "local" | "region";
   countryCode?: string;
 };
 
@@ -40,13 +40,16 @@ function localRadiusKm(point: DestinationPoint): number {
 
 // Real (simplified) administrative boundary polygon from world-atlas when we have one
 // for this country; otherwise fall back to a circle so we still render *something*
-// closer to a real footprint than a rectangle.
+// closer to a real footprint than a rectangle. Broad regions ("East Asia/SE Asia", ...)
+// have no boundary data at all — they're this app's own multi-country groupings, not a
+// real admin area — so they always get a large area circle instead of a pin.
 function toCountryFeature(point: DestinationPoint): NamedFeature {
   const boundary = point.countryCode ? getCountryBoundary(point.countryCode) : undefined;
   if (boundary) {
     return { ...boundary, properties: { name: point.name } } as NamedFeature;
   }
-  const circle = turfCircle([point.lng, point.lat], localRadiusKm(point) * 4, {
+  const radiusKm = point.tier === "region" ? 900 : localRadiusKm(point) * 4;
+  const circle = turfCircle([point.lng, point.lat], radiusKm, {
     steps: 64,
     units: "kilometers",
   });
@@ -119,7 +122,7 @@ export default function TripDestinationsMap({ points }: { points: DestinationPoi
     if (!map) return;
 
     function render() {
-      const countryPoints = points.filter((p) => p.tier === "country");
+      const countryPoints = points.filter((p) => p.tier === "country" || p.tier === "region");
       const localPoints = points.filter((p) => p.tier === "local");
       const countryFeatures = countryPoints.map(toCountryFeature);
       const countryData = toFeatureCollection(countryFeatures);

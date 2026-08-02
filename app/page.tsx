@@ -251,7 +251,7 @@ function matchesDurationFilter(date: TripDate, unit: DurationUnit | "All"): bool
   return date.duration?.unit === unit;
 }
 
-type GeoTier = "country" | "local";
+type GeoTier = "country" | "local" | "region";
 type GeoPoint = {
   name: string;
   lat: number;
@@ -280,7 +280,7 @@ function destinationQueries(
     }));
     return [countryEntry, ...cityEntries];
   }
-  return destination.regions.map((region) => ({ name: region, query: region, tier: "local" as const }));
+  return destination.regions.map((region) => ({ name: region, query: region, tier: "region" as const }));
 }
 
 function staticFallbackPoint(destination: Destination, name: string, tier: GeoTier): GeoPoint {
