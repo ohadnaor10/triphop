@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { buildMonthGrid, pickRangeDate, toISO, WEEKDAYS } from "../lib/calendar";
 
 type CalendarRangePickerProps = {
   startDate: string;
@@ -8,23 +9,7 @@ type CalendarRangePickerProps = {
   onChange: (range: { startDate: string; endDate: string }) => void;
 };
 
-function toISO(year: number, month: number, day: number): string {
-  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-function buildMonthGrid(year: number, month: number): (string | null)[] {
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells: (string | null)[] = Array(firstDay).fill(null);
-  for (let day = 1; day <= daysInMonth; day++) {
-    cells.push(toISO(year, month, day));
-  }
-  return cells;
-}
-
-const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
-
-function MonthGrid({
+export function MonthGrid({
   year,
   month,
   startDate,
@@ -87,15 +72,7 @@ export default function CalendarRangePicker({ startDate, endDate, onChange }: Ca
   const [viewMonth, setViewMonth] = useState(now.getMonth());
 
   function handlePick(iso: string) {
-    if (!startDate || (startDate && endDate)) {
-      onChange({ startDate: iso, endDate: "" });
-      return;
-    }
-    if (iso < startDate) {
-      onChange({ startDate: iso, endDate: "" });
-      return;
-    }
-    onChange({ startDate, endDate: iso });
+    onChange(pickRangeDate({ startDate, endDate }, iso));
   }
 
   function goPrevMonth() {
