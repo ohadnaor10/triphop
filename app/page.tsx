@@ -4,14 +4,15 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState, type SubmitEvent } from "react";
 import { flushSync } from "react-dom";
 import {
-  IconAlertTriangle,
   IconCalendar,
+  IconChevronLeft,
   IconGlobe,
   IconGrid,
   IconHeart,
   IconMap,
   IconMapPin,
   IconPlus,
+  IconSearch,
   IconSliders,
   IconUser,
   IconWhatsApp,
@@ -21,8 +22,11 @@ import type { FeedMapPoint, FeedMapPost } from "./components/TripMap";
 import Combobox from "./components/Combobox";
 import CalendarRangePicker from "./components/CalendarRangePicker";
 import DestinationPickerOverlay from "./components/DestinationPickerOverlay";
+import PostDestinationCarousel from "./components/PostDestinationCarousel";
 import DatePickerOverlay from "./components/DatePickerOverlay";
-import DurationInput, { DURATION_UNITS, type DurationUnit, type DurationValue } from "./components/DurationInput";
+import DateSearchFields from "./components/DateSearchFields";
+import MonthCarousel from "./components/MonthCarousel";
+import { getPopularDestinations } from "./data/popularDestinations";
 import {
   geocodePlace,
   geocodeSuggestions,
@@ -36,7 +40,7 @@ import {
   type GeoDestination,
   type Region,
 } from "./lib/geo";
-import { durationToDays, hasActiveDateSearch, rankByRelevance, type DateSearchInput } from "./lib/relevance";
+import { hasActiveDateSearch, rankByRelevance, type DateSearchInput } from "./lib/relevance";
 import { INITIAL_POSTS } from "./data/mockPosts";
 
 const TripMap = dynamic(() => import("./components/TripMap"), {
@@ -70,11 +74,9 @@ export type FocusedDestination = { mode: "focused"; country: string; countryCode
 export type BroadDestination = { mode: "broad"; regions: Region[] };
 export type Destination = FocusedDestination | BroadDestination;
 
-export type TripDuration = { amount: number; unit: DurationUnit };
-
 export type FocusedDateInfo = { mode: "focused"; startDate: string; endDate: string };
-export type BroadDateInfo = { mode: "broad"; months: string[]; duration?: TripDuration };
-export type FlexibleDateInfo = { mode: "flexible"; earliest: string; latest: string; duration?: TripDuration };
+export type BroadDateInfo = { mode: "broad"; months: string[] };
+export type FlexibleDateInfo = { mode: "flexible"; earliest: string; latest: string };
 export type TripDate = FocusedDateInfo | BroadDateInfo | FlexibleDateInfo;
 
 export type Post = {
@@ -136,13 +138,6 @@ function daysBetween(start: string, end: string) {
   return Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86_400_000) + 1;
 }
 
-function isDurationWithinRange(duration: DurationValue, startDate: string, endDate: string): boolean {
-  if (!duration.amount || !startDate || !endDate) return true;
-  const durationDays = durationToDays({ amount: Number(duration.amount), unit: duration.unit });
-  if (durationDays === undefined) return true;
-  return durationDays <= daysBetween(startDate, endDate);
-}
-
 function groupConsecutive(nums: number[]): [number, number][] {
   const sorted = [...nums].sort((a, b) => a - b);
   const runs: [number, number][] = [];
@@ -190,11 +185,6 @@ function formatMonthsCompact(months: string[]): string {
   return remaining > 0 ? `${first.label} (+${remaining} month${remaining > 1 ? "s" : ""})` : first.label;
 }
 
-function formatDuration(duration: TripDuration): string {
-  const unit = duration.amount === 1 ? duration.unit.slice(0, -1) : duration.unit;
-  return `~${duration.amount} ${unit}`;
-}
-
 function formatGender(gender: Gender): string {
   if (gender === "Woman") return "F";
   if (gender === "Man") return "M";
@@ -238,17 +228,9 @@ function getDateLabel(date: TripDate, compact = false): string {
     return `${formatDateRange(date.startDate, date.endDate)} · ${daysBetween(date.startDate, date.endDate)} days`;
   }
   if (date.mode === "flexible") {
-    const base = `Flexible: ${formatDateRange(date.earliest, date.latest)}`;
-    return date.duration ? `${base} · ${formatDuration(date.duration)}` : base;
+    return `Flexible: ${formatDateRange(date.earliest, date.latest)}`;
   }
-  const months = compact ? formatMonthsCompact(date.months) : formatMonthsSmart(date.months);
-  return date.duration ? `${months} · ${formatDuration(date.duration)}` : months;
-}
-
-function matchesDurationFilter(date: TripDate, unit: DurationUnit | "All"): boolean {
-  if (unit === "All") return true;
-  if (date.mode === "focused") return unit === "Days";
-  return date.duration?.unit === unit;
+  return compact ? formatMonthsCompact(date.months) : formatMonthsSmart(date.months);
 }
 
 type GeoTier = "country" | "local" | "region";
@@ -377,58 +359,29 @@ function initials(name: string) {
 
 // ---------- Form state ----------
 
-type DestinationMode = "focused" | "broad";
-type DateMode = "range" | "broad";
+type DestinationEntry =
+  | { kind: "country"; country: string; countryCode: string; cities: string[] }
+  | { kind: "region"; region: Region };
 
-type DestinationEntry = {
-  destinationMode: DestinationMode;
-  country: string;
-  countryCode: string;
-  cities: string[];
-  regions: Region[];
-};
-
-const EMPTY_DESTINATION_ENTRY: DestinationEntry = {
-  destinationMode: "focused",
-  country: "",
-  countryCode: "",
-  cities: [],
-  regions: [],
-};
-
-type FormState = {
-  destinations: DestinationEntry[];
-  dateMode: DateMode;
-  startDate: string;
-  endDate: string;
-  isFlexible: boolean;
-  months: string[];
-  duration: DurationValue;
-  vibes: TripVibe[];
-  bio: string;
-};
-
-const EMPTY_FORM: FormState = {
-  destinations: [{ ...EMPTY_DESTINATION_ENTRY }],
-  dateMode: "range",
-  startDate: "",
-  endDate: "",
-  isFlexible: false,
-  months: [],
-  duration: { amount: "", unit: "Days" },
-  vibes: [],
-  bio: "",
-};
-
-function nextMonthOptions(count: number): string[] {
+// Bounded month range (not infinite) spanning `yearsBack`..`yearsForward` years around
+// today, used by the month carousel everywhere it appears.
+function monthRangeOptions(yearsBack: number, yearsForward: number): string[] {
   const now = new Date();
-  return Array.from({ length: count }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+  const start = -yearsBack * 12;
+  const end = yearsForward * 12;
+  return Array.from({ length: end - start + 1 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + start + i, 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
 }
 
-// ---------- Hero date search ----------
+function currentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// ---------- Date search (shared shape for both the hero search and the post-creation
+// wizard's dates step, so the two stay in lockstep — see DateSearchFields) ----------
 
 export type DateSearchMode = "specific" | "flexible";
 
@@ -437,7 +390,6 @@ export type DateSearchUI = {
   startDate: string;
   endDate: string;
   months: string[];
-  duration: DurationValue;
 };
 
 const EMPTY_DATE_SEARCH: DateSearchUI = {
@@ -445,20 +397,28 @@ const EMPTY_DATE_SEARCH: DateSearchUI = {
   startDate: "",
   endDate: "",
   months: [],
-  duration: { amount: "", unit: "Days" },
 };
 
 function toSearchInput(search: DateSearchUI): DateSearchInput {
   if (search.mode === "specific") {
     return { mode: "specific", startDate: search.startDate, endDate: search.endDate };
   }
-  const amount = Number(search.duration.amount);
-  return {
-    mode: "flexible",
-    months: search.months,
-    duration: amount > 0 ? { amount, unit: search.duration.unit } : undefined,
-  };
+  return { mode: "flexible", months: search.months };
 }
+
+type FormState = {
+  destinations: DestinationEntry[];
+  dates: DateSearchUI;
+  vibes: TripVibe[];
+  bio: string;
+};
+
+const EMPTY_FORM: FormState = {
+  destinations: [],
+  dates: EMPTY_DATE_SEARCH,
+  vibes: [],
+  bio: "",
+};
 
 function getDateSearchLabel(search: DateSearchUI | null): string {
   if (!search) return "Any dates";
@@ -466,6 +426,16 @@ function getDateSearchLabel(search: DateSearchUI | null): string {
     return search.startDate && search.endDate ? formatDateRange(search.startDate, search.endDate) : "Any dates";
   }
   return search.months.length > 0 ? formatMonthsCompact(search.months) : "Any dates";
+}
+
+// Compact 1-2 line summary of what's been picked so far — shown pinned at the top of
+// later wizard steps once the destination/dates step is behind the user, so it stays
+// visible without competing for attention with the step actually in focus.
+function getDestinationEntriesSummary(entries: DestinationEntry[]): string {
+  if (entries.length === 0) return "";
+  return entries
+    .map((e) => (e.kind === "country" ? (e.cities.length > 0 ? `${e.country} — ${e.cities.join(", ")}` : e.country) : e.region))
+    .join("  +  ");
 }
 
 // Wraps a state update in a View Transition so the shared-name "logo" element can morph
@@ -483,13 +453,15 @@ export default function HomePage() {
   const [view, setView] = useState<"feed" | "map">("feed");
   const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
   const [selectedDestinations, setSelectedDestinations] = useState<SearchDestination[]>([]);
+  const [destinationPickerCloseOnSelect, setDestinationPickerCloseOnSelect] = useState(true);
   const [destinationQuery, setDestinationQuery] = useState("");
   const [vibeFilter, setVibeFilter] = useState<TripVibe | "All">("All");
   const [appliedDateSearch, setAppliedDateSearch] = useState<DateSearchUI | null>(null);
   const [dateSearchDraft, setDateSearchDraft] = useState<DateSearchUI>(EMPTY_DATE_SEARCH);
   const [genderFilter, setGenderFilter] = useState<Gender | "All">("All");
-  const [durationUnitFilter, setDurationUnitFilter] = useState<DurationUnit | "All">("All");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [postStep, setPostStep] = useState<0 | 1 | 2>(0);
+  const [postDestQuery, setPostDestQuery] = useState("");
   const [viewPostId, setViewPostId] = useState<string | null>(null);
   const [isTripMapOpen, setIsTripMapOpen] = useState(false);
   const [tripMapPoints, setTripMapPoints] = useState<GeoPoint[]>([]);
@@ -505,7 +477,7 @@ export default function HomePage() {
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
 
-  const monthOptions = useMemo(() => nextMonthOptions(12), []);
+  const monthOptions = useMemo(() => monthRangeOptions(2, 2), []);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -561,9 +533,8 @@ export default function HomePage() {
       const matchesRegion = postMatchesDestinationSearch(post.destinations, selectedDestinations);
       const matchesVibe = vibeFilter === "All" || post.vibes.includes(vibeFilter);
       const matchesGender = genderFilter === "All" || post.user.gender === genderFilter;
-      const matchesDuration = matchesDurationFilter(post.date, durationUnitFilter);
       const matchesSaved = !showSavedOnly || savedPostIds.has(post.id);
-      return matchesRegion && matchesVibe && matchesGender && matchesDuration && matchesSaved;
+      return matchesRegion && matchesVibe && matchesGender && matchesSaved;
     });
 
     if (!appliedDateSearch) return base;
@@ -578,7 +549,6 @@ export default function HomePage() {
     selectedDestinations,
     vibeFilter,
     genderFilter,
-    durationUnitFilter,
     showSavedOnly,
     savedPostIds,
     appliedDateSearch,
@@ -668,12 +638,57 @@ export default function HomePage() {
     return { countries, regions, cities, places };
   }, [destinationQuery, allPostCities, placeSuggestions]);
 
-  const countryOptions = useMemo(
-    () => getAllCountries().map((c) => ({ value: c.isoCode, label: `${c.flag} ${c.name}` })),
-    [],
-  );
+  // Post-creation destination picker: same search + infinite-scroll carousel of
+  // countries/regions as the hero search (see DestinationPickerOverlay), restricted to
+  // country/region cards since cities are handled per-country below (see the "add
+  // specific places" reveal).
+  const postDestinationCards = useMemo((): SearchDestination[] => {
+    const q = postDestQuery.trim().toLowerCase();
+    if (q === "") {
+      return getPopularDestinations().map((c) => ({ type: "country" as const, code: c.isoCode, name: c.name }));
+    }
+    const countries: SearchDestination[] = getAllCountries()
+      .filter((c) => c.name.toLowerCase().includes(q))
+      .slice(0, 12)
+      .map((c) => ({ type: "country" as const, code: c.isoCode, name: c.name }));
+    const regions: SearchDestination[] = REGIONS.filter((r) => r.toLowerCase().includes(q)).map((r) => ({
+      type: "region" as const,
+      name: r,
+    }));
+    return [...countries, ...regions];
+  }, [postDestQuery]);
 
-  function citiesOptionsFor(entry: DestinationEntry) {
+  function isDestinationChosen(item: SearchDestination): boolean {
+    if (item.type === "country") return form.destinations.some((e) => e.kind === "country" && e.countryCode === item.code);
+    if (item.type === "region") return form.destinations.some((e) => e.kind === "region" && e.region === item.name);
+    return false;
+  }
+
+  function toggleDestinationChoice(item: SearchDestination) {
+    if (item.type === "country") {
+      setForm((prev) => {
+        const exists = prev.destinations.some((e) => e.kind === "country" && e.countryCode === item.code);
+        return {
+          ...prev,
+          destinations: exists
+            ? prev.destinations.filter((e) => !(e.kind === "country" && e.countryCode === item.code))
+            : [...prev.destinations, { kind: "country", country: item.name, countryCode: item.code, cities: [] }],
+        };
+      });
+    } else if (item.type === "region") {
+      setForm((prev) => {
+        const exists = prev.destinations.some((e) => e.kind === "region" && e.region === item.name);
+        return {
+          ...prev,
+          destinations: exists
+            ? prev.destinations.filter((e) => !(e.kind === "region" && e.region === item.name))
+            : [...prev.destinations, { kind: "region", region: item.name }],
+        };
+      });
+    }
+  }
+
+  function citiesOptionsFor(entry: Extract<DestinationEntry, { kind: "country" }>) {
     const citiesOfCountry = getCitiesOfCountry(entry.countryCode);
     return {
       quickCities: citiesOfCountry.slice(0, 5),
@@ -709,109 +724,86 @@ export default function HomePage() {
     }));
   }
 
-  function updateDestinationEntry(index: number, updater: (entry: DestinationEntry) => DestinationEntry) {
+  function updateCountryEntry(
+    index: number,
+    updater: (entry: Extract<DestinationEntry, { kind: "country" }>) => DestinationEntry,
+  ) {
     setForm((prev) => ({
       ...prev,
-      destinations: prev.destinations.map((entry, i) => (i === index ? updater(entry) : entry)),
-    }));
-  }
-
-  function setEntryMode(index: number, mode: DestinationMode) {
-    updateDestinationEntry(index, (entry) => ({ ...entry, destinationMode: mode }));
-  }
-
-  function setEntryCountry(index: number, isoCode: string) {
-    const country = getCountryByCode(isoCode);
-    if (!country) return;
-    updateDestinationEntry(index, (entry) => ({
-      ...entry,
-      country: country.name,
-      countryCode: country.isoCode,
-      cities: [],
-    }));
-  }
-
-  function toggleEntryRegion(index: number, region: Region) {
-    updateDestinationEntry(index, (entry) => ({
-      ...entry,
-      regions: entry.regions.includes(region) ? entry.regions.filter((r) => r !== region) : [...entry.regions, region],
+      destinations: prev.destinations.map((entry, i) =>
+        i === index && entry.kind === "country" ? updater(entry) : entry,
+      ),
     }));
   }
 
   function toggleEntryCity(index: number, city: string) {
-    updateDestinationEntry(index, (entry) => ({
+    updateCountryEntry(index, (entry) => ({
       ...entry,
       cities: entry.cities.includes(city) ? entry.cities.filter((c) => c !== city) : [...entry.cities, city],
     }));
   }
 
   function addEntryCity(index: number, city: string) {
-    updateDestinationEntry(index, (entry) =>
+    updateCountryEntry(index, (entry) =>
       entry.cities.includes(city) ? entry : { ...entry, cities: [...entry.cities, city] },
     );
-  }
-
-  function addDestinationEntry() {
-    setForm((prev) => ({ ...prev, destinations: [...prev.destinations, { ...EMPTY_DESTINATION_ENTRY }] }));
   }
 
   function removeDestinationEntry(index: number) {
     setForm((prev) => ({ ...prev, destinations: prev.destinations.filter((_, i) => i !== index) }));
   }
 
-  function toggleFormMonth(month: string) {
-    setForm((prev) => ({
-      ...prev,
-      months: prev.months.includes(month) ? prev.months.filter((m) => m !== month) : [...prev.months, month],
-    }));
-  }
-
   function resetForm() {
     setForm(EMPTY_FORM);
   }
 
-  // True once the destination step has at least one entry, but none of them pin down a
-  // real spot (a city under a focused country) — matches getSpecificDestinations, so
-  // this post would end up invisible on the feed map.
-  const formHasNoSpecificDestination =
-    form.destinations.length > 0 &&
-    form.destinations.every((entry) => entry.destinationMode === "broad" || entry.cities.length === 0);
+  function isDestinationStepValid(): boolean {
+    return form.destinations.length > 0;
+  }
+
+  function isDatesStepValid(): boolean {
+    return hasActiveDateSearch(toSearchInput(form.dates));
+  }
+
+  function isPostStepValid(step: 0 | 1 | 2): boolean {
+    if (step === 0) return isDestinationStepValid();
+    if (step === 1) return isDatesStepValid();
+    return true;
+  }
 
   function isFormValid(): boolean {
-    const destinationValid =
-      form.destinations.length > 0 &&
-      form.destinations.every((entry) =>
-        entry.destinationMode === "focused" ? Boolean(entry.country) : entry.regions.length > 0,
-      );
-    const dateValid =
-      form.dateMode === "range"
-        ? Boolean(form.startDate && form.endDate) &&
-          (!form.isFlexible || isDurationWithinRange(form.duration, form.startDate, form.endDate))
-        : form.months.length > 0;
-    return destinationValid && dateValid;
+    return isDestinationStepValid() && isDatesStepValid();
+  }
+
+  function openPostModal() {
+    setPostStep(0);
+    setPostDestQuery("");
+    setIsModalOpen(true);
   }
 
   function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
+    // Guards against any stray submit event reaching the form while the user is still
+    // mid-wizard (only the last step renders an actual type="submit" button, but this
+    // makes it structurally impossible for a post to be created before then regardless).
+    if (postStep !== 2) return;
     if (!isFormValid()) return;
 
-    const destinations: Destination[] = form.destinations.map((entry) =>
-      entry.destinationMode === "focused"
-        ? { mode: "focused", country: entry.country, countryCode: entry.countryCode, cities: entry.cities }
-        : { mode: "broad", regions: entry.regions },
-    );
-
-    const duration: TripDuration | undefined =
-      form.duration.amount && Number(form.duration.amount) > 0
-        ? { amount: Number(form.duration.amount), unit: form.duration.unit }
-        : undefined;
+    const countryDestinations: Destination[] = form.destinations
+      .filter((entry): entry is Extract<DestinationEntry, { kind: "country" }> => entry.kind === "country")
+      .map((entry) => ({ mode: "focused", country: entry.country, countryCode: entry.countryCode, cities: entry.cities }));
+    const chosenRegions = form.destinations
+      .filter((entry): entry is Extract<DestinationEntry, { kind: "region" }> => entry.kind === "region")
+      .map((entry) => entry.region);
+    const destinations: Destination[] = [
+      ...countryDestinations,
+      ...(chosenRegions.length > 0 ? [{ mode: "broad" as const, regions: chosenRegions }] : []),
+    ];
 
     const date: TripDate =
-      form.dateMode === "range"
-        ? form.isFlexible
-          ? { mode: "flexible", earliest: form.startDate, latest: form.endDate, duration }
-          : { mode: "focused", startDate: form.startDate, endDate: form.endDate }
-        : { mode: "broad", months: form.months, duration };
+      form.dates.mode === "specific"
+        ? { mode: "focused", startDate: form.dates.startDate, endDate: form.dates.endDate }
+        : { mode: "broad", months: form.dates.months };
 
     const newPost: Post = {
       id: crypto.randomUUID(),
@@ -834,26 +826,51 @@ export default function HomePage() {
   // the two surfaces can't drift apart. Plain functions (not components) so calling them
   // inline doesn't remount the DOM/reset focus on every render.
   function renderDestinationTrigger(size: "sm" | "lg") {
+    const hasSelection = selectedDestinations.length > 0;
     return (
-      <button
-        type="button"
-        onClick={() => setOpenHeroField(openHeroField === "destination" ? null : "destination")}
-        className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left transition ${
-          size === "lg"
-            ? "border-b border-slate-100 px-4 py-4 sm:border-b-0 sm:border-r"
-            : "border-r border-slate-100 px-3 py-2.5"
+      <div
+        className={`flex min-w-0 flex-1 items-center transition ${
+          size === "lg" ? "border-b border-slate-100 sm:border-b-0 sm:border-r" : "border-r border-slate-100"
         } ${openHeroField === "destination" ? "bg-orange-50" : "bg-white hover:bg-slate-50"}`}
       >
-        <span
-          className={`flex items-center gap-1 font-semibold uppercase tracking-wide text-slate-400 ${size === "lg" ? "text-xs" : "text-[10px]"}`}
+        <button
+          type="button"
+          onClick={() => {
+            const opening = openHeroField !== "destination";
+            if (opening) setDestinationPickerCloseOnSelect(selectedDestinations.length === 0);
+            setOpenHeroField(openHeroField === "destination" ? null : "destination");
+          }}
+          className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left ${
+            size === "lg" ? "px-4 py-4" : "px-3 py-2.5"
+          }`}
         >
-          <IconMapPin className={size === "lg" ? "h-3.5 w-3.5" : "h-3 w-3"} />
-          Destination
-        </span>
-        <span className={`w-full truncate font-semibold text-slate-900 ${size === "lg" ? "text-base" : "text-sm"}`}>
-          {selectedDestinations.length === 0 ? "Anywhere" : selectedDestinations.map((d) => d.name).join(" + ")}
-        </span>
-      </button>
+          <span
+            className={`flex items-center gap-1 font-semibold uppercase tracking-wide text-slate-400 ${size === "lg" ? "text-xs" : "text-[10px]"}`}
+          >
+            <IconMapPin className={size === "lg" ? "h-3.5 w-3.5" : "h-3 w-3"} />
+            Destination
+          </span>
+          <span className={`w-full truncate font-semibold text-slate-900 ${size === "lg" ? "text-base" : "text-sm"}`}>
+            {hasSelection ? selectedDestinations.map((d) => d.name).join(" + ") : "Anywhere"}
+          </span>
+        </button>
+
+        {hasSelection && (
+          <button
+            type="button"
+            onClick={() => {
+              setDestinationPickerCloseOnSelect(false);
+              setOpenHeroField("destination");
+            }}
+            aria-label="Choose more destinations"
+            className={`mr-2 flex shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 active:scale-90 ${
+              size === "lg" ? "h-7 w-7" : "h-6 w-6"
+            }`}
+          >
+            <IconPlus className={size === "lg" ? "h-4 w-4" : "h-3.5 w-3.5"} />
+          </button>
+        )}
+      </div>
     );
   }
 
@@ -904,6 +921,13 @@ export default function HomePage() {
                 </button>
               </span>
             ))}
+            <button
+              type="button"
+              onClick={() => setSelectedDestinations([])}
+              className="ml-1 text-xs font-semibold text-slate-400 transition hover:text-slate-700 hover:underline"
+            >
+              Clear
+            </button>
           </div>
         )}
 
@@ -1011,34 +1035,18 @@ export default function HomePage() {
               }}
             />
           ) : (
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-1.5">
-                {monthOptions.map((month) => (
-                  <button
-                    key={month}
-                    type="button"
-                    onClick={() =>
-                      setDateSearchDraft((d) => ({
-                        ...d,
-                        months: d.months.includes(month) ? d.months.filter((m) => m !== month) : [...d.months, month],
-                      }))
-                    }
-                    className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition ${
-                      dateSearchDraft.months.includes(month)
-                        ? "bg-orange-500 text-white ring-orange-500"
-                        : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                    }`}
-                  >
-                    {formatMonth(month)}
-                  </button>
-                ))}
-              </div>
-              <DurationInput
-                value={dateSearchDraft.duration}
-                onChange={(duration) => setDateSearchDraft((d) => ({ ...d, duration }))}
-                label="Optional: trip duration"
-              />
-            </div>
+            <MonthCarousel
+              months={monthOptions}
+              selected={dateSearchDraft.months}
+              formatMonth={formatMonth}
+              currentMonth={currentMonthKey()}
+              onToggle={(month) =>
+                setDateSearchDraft((d) => ({
+                  ...d,
+                  months: d.months.includes(month) ? d.months.filter((m) => m !== month) : [...d.months, month],
+                }))
+              }
+            />
           )}
         </div>
 
@@ -1184,21 +1192,6 @@ export default function HomePage() {
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Trip duration</label>
-                  <select
-                    value={durationUnitFilter}
-                    onChange={(e) => setDurationUnitFilter(e.target.value as DurationUnit | "All")}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-                  >
-                    <option value="All">Any</option>
-                    {DURATION_UNITS.map((unit) => (
-                      <option key={unit} value={unit}>
-                        {unit}
-                      </option>
-                    ))}
-                  </select>
-                </div>
               </div>
             )}
           </div>
@@ -1264,13 +1257,10 @@ export default function HomePage() {
                   onQueryChange={setDestinationQuery}
                   results={destinationResults}
                   destinationKey={destinationKey}
-                  onSelect={(dest) =>
-                    withViewTransition(() => {
-                      setSelectedDestinations([dest]);
-                      setHasSearched(true);
-                      setOpenHeroField(null);
-                    })
-                  }
+                  selectedDestinations={selectedDestinations}
+                  closeOnSelect={destinationPickerCloseOnSelect}
+                  onSelect={(dest) => withViewTransition(() => toggleSelectedDestination(dest))}
+                  onClear={() => withViewTransition(() => setSelectedDestinations([]))}
                   onClose={() => setOpenHeroField(null)}
                 />
               )}
@@ -1280,11 +1270,11 @@ export default function HomePage() {
                   draft={dateSearchDraft}
                   onDraftChange={setDateSearchDraft}
                   monthOptions={monthOptions}
+                  currentMonth={currentMonthKey()}
                   formatMonth={formatMonth}
                   onAutoApply={(next) =>
                     withViewTransition(() => {
                       setAppliedDateSearch(next);
-                      setHasSearched(true);
                       setOpenHeroField(null);
                     })
                   }
@@ -1295,7 +1285,6 @@ export default function HomePage() {
                           ? Boolean(dateSearchDraft.startDate && dateSearchDraft.endDate)
                           : dateSearchDraft.months.length > 0;
                       setAppliedDateSearch(hasContent ? dateSearchDraft : null);
-                      setHasSearched(true);
                       setOpenHeroField(null);
                     })
                   }
@@ -1303,7 +1292,6 @@ export default function HomePage() {
                     withViewTransition(() => {
                       setDateSearchDraft(EMPTY_DATE_SEARCH);
                       setAppliedDateSearch(null);
-                      setHasSearched(true);
                       setOpenHeroField(null);
                     })
                   }
@@ -1465,7 +1453,7 @@ export default function HomePage() {
       {hasSearched && (
         <button
           type="button"
-          onClick={() => setIsModalOpen(true)}
+          onClick={openPostModal}
           aria-label="Create new post"
           className="fixed bottom-6 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-orange-500 text-white shadow-lg shadow-orange-500/30 transition active:scale-95 active:bg-orange-600"
         >
@@ -1476,310 +1464,223 @@ export default function HomePage() {
       {/* Create Post Modal (slide-over) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[1200] flex items-end justify-center sm:items-center">
-          <div
-            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            onClick={() => setIsModalOpen(false)}
-          />
+          <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
 
-          <div className="relative z-10 max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl">
-            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-200 sm:hidden" />
-
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Share your trip</h2>
-                <p className="text-xs text-slate-500">
-                  Posting as {CURRENT_USER.name} · {CURRENT_USER.age} · {formatGender(CURRENT_USER.gender)}
-                </p>
+          <div className="relative z-10 flex h-[100dvh] w-full flex-col overflow-hidden bg-slate-900 sm:h-[85dvh] sm:max-w-lg sm:rounded-3xl sm:shadow-2xl">
+            <form onSubmit={handleSubmit} className="flex h-full flex-col">
+              {/* Step header: back/close + progress dots */}
+              <div className="flex items-center gap-3 px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-3 sm:pt-4">
+                <button
+                  type="button"
+                  onClick={() =>
+                    postStep === 0
+                      ? setIsModalOpen(false)
+                      : withViewTransition(() => setPostStep((s) => (s - 1) as 0 | 1 | 2))
+                  }
+                  aria-label={postStep === 0 ? "Close" : "Back"}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition active:scale-95 active:bg-white/20"
+                >
+                  {postStep === 0 ? <IconX className="h-4 w-4" /> : <IconChevronLeft className="h-4 w-4" />}
+                </button>
+                <div className="flex flex-1 gap-1.5">
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className={`h-1 flex-1 rounded-full transition ${i <= postStep ? "bg-orange-500" : "bg-white/15"}`}
+                    />
+                  ))}
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                aria-label="Close"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition active:bg-slate-200"
-              >
-                <IconX className="h-4 w-4" />
-              </button>
-            </div>
 
-            <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-              {/* Destination(s) */}
-              <div className="flex flex-col gap-4">
-                <label className="-mb-2.5 block text-xs font-medium text-slate-500">Destination</label>
-                {form.destinations.map((entry, index) => {
-                  const { quickCities, cityOptions } = citiesOptionsFor(entry);
-                  return (
-                    <div key={index} className="rounded-2xl border border-slate-100 p-3">
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                          Destination {index + 1}
-                        </span>
-                        {form.destinations.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeDestinationEntry(index)}
-                            aria-label={`Remove destination ${index + 1}`}
-                            className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition active:bg-slate-200"
-                          >
-                            <IconX className="h-3 w-3" />
-                          </button>
-                        )}
+              {/* Step content */}
+              <div className="flex-1 overflow-y-auto px-4 pb-4">
+                {postStep === 0 && (
+                  <div className="flex flex-col gap-4">
+                    <div>
+                      <h2 className="text-lg font-bold text-white">Where are you going?</h2>
+                      <p className="text-xs text-slate-400">Search countries or regions — pick as many as you like.</p>
+                    </div>
+
+                    <div className="relative">
+                      <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        value={postDestQuery}
+                        onChange={(e) => setPostDestQuery(e.target.value)}
+                        placeholder="Search countries or regions…"
+                        className="w-full rounded-2xl border border-white/10 bg-white/10 py-2.5 pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-400 focus:border-orange-400/60 focus:ring-2 focus:ring-orange-400/30"
+                      />
+                    </div>
+
+                    {postDestinationCards.length === 0 ? (
+                      <p className="text-center text-sm text-slate-400">No matches found</p>
+                    ) : (
+                      <PostDestinationCarousel
+                        items={postDestinationCards}
+                        isSearching={postDestQuery.trim() !== ""}
+                        isSelected={isDestinationChosen}
+                        onSelect={toggleDestinationChoice}
+                      />
+                    )}
+
+                    {form.destinations.map((entry, index) => {
+                      const key = entry.kind === "country" ? `country:${entry.countryCode}` : `region:${entry.region}`;
+                      const label = entry.kind === "country" ? entry.country : entry.region;
+                      return (
+                        <div key={key} className="rounded-xl bg-white/5 ring-1 ring-inset ring-white/10">
+                          <div className="flex items-center justify-between px-3 py-2">
+                            <span className="text-sm font-medium text-white">{label}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeDestinationEntry(index)}
+                              aria-label={`Remove ${label}`}
+                              className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white"
+                            >
+                              <IconX className="h-3 w-3" />
+                            </button>
+                          </div>
+
+                          {entry.kind === "country" &&
+                            (() => {
+                              const { cityOptions } = citiesOptionsFor(entry);
+                              return (
+                                <div className="border-t border-white/10 px-3 pb-3 pt-2">
+                                  <Combobox
+                                    options={cityOptions}
+                                    onSelect={(opt) => addEntryCity(index, opt.value)}
+                                    placeholder={`Add specific places in ${entry.country}…`}
+                                    emptyMessage="No matching cities"
+                                  />
+
+                                  {entry.cities.length > 0 && (
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                      {entry.cities.map((city) => (
+                                        <span
+                                          key={city}
+                                          className="flex items-center gap-1 rounded-full bg-white/10 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white"
+                                        >
+                                          {city}
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleEntryCity(index, city)}
+                                            aria-label={`Remove ${city}`}
+                                            className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-white/20"
+                                          >
+                                            <IconX className="h-2.5 w-2.5" />
+                                          </button>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {postStep === 1 && (
+                  <div className="flex flex-col gap-4">
+                    <div className="rounded-xl bg-white/5 px-3 py-2 ring-1 ring-inset ring-white/10">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Destination</p>
+                      <p className="line-clamp-2 text-sm font-medium text-white">
+                        {getDestinationEntriesSummary(form.destinations)}
+                      </p>
+                    </div>
+
+                    <div>
+                      <h2 className="text-lg font-bold text-white">When&apos;s the trip?</h2>
+                      <p className="text-xs text-slate-400">Give travelers a sense of your timing.</p>
+                    </div>
+                    <DateSearchFields
+                      draft={form.dates}
+                      onDraftChange={(updater) => setForm((p) => ({ ...p, dates: updater(p.dates) }))}
+                      monthOptions={monthOptions}
+                      currentMonth={currentMonthKey()}
+                      formatMonth={formatMonth}
+                    />
+                  </div>
+                )}
+
+                {postStep === 2 && (
+                  <div className="flex flex-col gap-5">
+                    <div className="flex flex-col gap-2 rounded-xl bg-white/5 px-3 py-2 ring-1 ring-inset ring-white/10">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Destination</p>
+                        <p className="line-clamp-2 text-sm font-medium text-white">
+                          {getDestinationEntriesSummary(form.destinations)}
+                        </p>
                       </div>
+                      <div className="border-t border-white/10 pt-2">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Dates</p>
+                        <p className="line-clamp-2 text-sm font-medium text-white">{getDateSearchLabel(form.dates)}</p>
+                      </div>
+                    </div>
 
-                      <div className="mb-2 flex gap-2">
-                        {(["focused", "broad"] as DestinationMode[]).map((mode) => (
+                    <div>
+                      <h2 className="text-lg font-bold text-white">Add some style</h2>
+                      <p className="text-xs text-slate-400">Optional finishing touches.</p>
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-300">
+                        Trip style / vibe (optional)
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {TRIP_STYLES.map((vibe) => (
                           <button
-                            key={mode}
+                            key={vibe}
                             type="button"
-                            onClick={() => setEntryMode(index, mode)}
-                            className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold ring-1 ring-inset transition ${
-                              entry.destinationMode === mode
-                                ? "bg-slate-900 text-white ring-slate-900"
-                                : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
+                            onClick={() => toggleFormVibe(vibe)}
+                            className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
+                              form.vibes.includes(vibe)
+                                ? "bg-orange-500 text-white ring-orange-500"
+                                : "bg-white/10 text-slate-200 ring-white/20 hover:bg-white/20"
                             }`}
                           >
-                            {mode === "focused" ? "Focused (country)" : "Broad (regions)"}
+                            {vibe}
                           </button>
                         ))}
                       </div>
-
-                      {entry.destinationMode === "focused" ? (
-                        <div className="flex flex-col gap-2">
-                          <Combobox
-                            options={countryOptions}
-                            selectedLabel={
-                              entry.country ? `${getCountryByCode(entry.countryCode)?.flag ?? ""} ${entry.country}` : ""
-                            }
-                            onSelect={(opt) => setEntryCountry(index, opt.value)}
-                            placeholder="Search for a country…"
-                            emptyMessage="No countries found"
-                          />
-
-                          {entry.countryCode && (
-                            <>
-                              <p className="mt-1 text-[11px] font-medium text-slate-400">
-                                Popular cities in {entry.country}
-                              </p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {quickCities.length === 0 && (
-                                  <span className="text-xs text-slate-400">
-                                    No city data available for this country
-                                  </span>
-                                )}
-                                {quickCities.map((city) => (
-                                  <button
-                                    key={city.name}
-                                    type="button"
-                                    onClick={() => toggleEntryCity(index, city.name)}
-                                    className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition ${
-                                      entry.cities.includes(city.name)
-                                        ? "bg-orange-500 text-white ring-orange-500"
-                                        : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                                    }`}
-                                  >
-                                    {city.name}
-                                  </button>
-                                ))}
-                              </div>
-
-                              <Combobox
-                                options={cityOptions}
-                                onSelect={(opt) => addEntryCity(index, opt.value)}
-                                placeholder={`Search any city in ${entry.country}…`}
-                                emptyMessage="No matching cities"
-                              />
-
-                              {entry.cities.length > 0 && (
-                                <div className="flex flex-wrap gap-1.5">
-                                  {entry.cities.map((city) => (
-                                    <span
-                                      key={city}
-                                      className="flex items-center gap-1 rounded-full bg-orange-500 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white"
-                                    >
-                                      {city}
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleEntryCity(index, city)}
-                                        aria-label={`Remove ${city}`}
-                                        className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-orange-600"
-                                      >
-                                        <IconX className="h-2.5 w-2.5" />
-                                      </button>
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {REGIONS.map((region) => (
-                            <button
-                              key={region}
-                              type="button"
-                              onClick={() => toggleEntryRegion(index, region)}
-                              className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
-                                entry.regions.includes(region)
-                                  ? "bg-orange-500 text-white ring-orange-500"
-                                  : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                              }`}
-                            >
-                              {region}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
-                  );
-                })}
 
-                <button
-                  type="button"
-                  onClick={addDestinationEntry}
-                  className="flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-300 px-3 py-2.5 text-xs font-semibold text-slate-500 transition hover:border-orange-400 hover:text-orange-600"
-                >
-                  <IconPlus className="h-3.5 w-3.5" />
-                  Add another destination
-                </button>
-
-                {formHasNoSpecificDestination && (
-                  <div
-                    dir="rtl"
-                    className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200"
-                  >
-                    <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                    <span>העלאה ללא יעדים ממוקדים לא תופיע בפיד המפה</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Dates */}
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-500">When</label>
-                <div className="mb-2 grid grid-cols-2 gap-2">
-                  {(["range", "broad"] as DateMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setForm((p) => ({ ...p, dateMode: mode }))}
-                      className={`rounded-xl px-2 py-2 text-[11px] font-semibold ring-1 ring-inset transition ${
-                        form.dateMode === mode
-                          ? "bg-slate-900 text-white ring-slate-900"
-                          : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                      }`}
-                    >
-                      {mode === "range" ? "Date range" : "Months"}
-                    </button>
-                  ))}
-                </div>
-
-                {form.dateMode === "range" && (
-                  <div className="flex flex-col gap-2">
-                    <CalendarRangePicker
-                      startDate={form.startDate}
-                      endDate={form.endDate}
-                      onChange={(range) => setForm((p) => ({ ...p, ...range }))}
-                    />
-                    {form.startDate && form.endDate && (
-                      <span className="w-fit rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
-                        {daysBetween(form.startDate, form.endDate)} days
-                      </span>
-                    )}
-
-                    <label className="mt-1 flex items-center gap-2 text-xs font-medium text-slate-600">
-                      <input
-                        type="checkbox"
-                        checked={form.isFlexible}
-                        onChange={(e) => setForm((p) => ({ ...p, isFlexible: e.target.checked }))}
-                        className="h-4 w-4 rounded border-slate-300 text-orange-500 focus:ring-orange-400"
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-300">Bio / description</label>
+                      <textarea
+                        value={form.bio}
+                        onChange={(e) => setForm((p) => ({ ...p, bio: e.target.value }))}
+                        placeholder="Tell potential travel partners about your plans, pace, and what you're looking for..."
+                        rows={4}
+                        className="w-full resize-none rounded-xl border border-white/20 bg-white/10 px-3 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-orange-400 focus:ring-2 focus:ring-orange-400/30"
                       />
-                      My dates are flexible within this range
-                    </label>
-
-                    {form.isFlexible && (
-                      <>
-                        <DurationInput
-                          value={form.duration}
-                          onChange={(duration) => setForm((p) => ({ ...p, duration }))}
-                          label="Optional: trip duration"
-                        />
-                        {!isDurationWithinRange(form.duration, form.startDate, form.endDate) && (
-                          <p className="text-[11px] font-medium text-rose-500">
-                            Duration can&apos;t exceed the {daysBetween(form.startDate, form.endDate)}-day range you
-                            selected.
-                          </p>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {form.dateMode === "broad" && (
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-wrap gap-1.5">
-                      {monthOptions.map((month) => (
-                        <button
-                          key={month}
-                          type="button"
-                          onClick={() => toggleFormMonth(month)}
-                          className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition ${
-                            form.months.includes(month)
-                              ? "bg-orange-500 text-white ring-orange-500"
-                              : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                          }`}
-                        >
-                          {formatMonth(month)}
-                        </button>
-                      ))}
                     </div>
-                    <DurationInput
-                      value={form.duration}
-                      onChange={(duration) => setForm((p) => ({ ...p, duration }))}
-                    />
                   </div>
                 )}
               </div>
 
-              {/* Vibe tags */}
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-500">Trip style / vibe (optional)</label>
-                <div className="flex flex-wrap gap-2">
-                  {TRIP_STYLES.map((vibe) => (
-                    <button
-                      key={vibe}
-                      type="button"
-                      onClick={() => toggleFormVibe(vibe)}
-                      className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
-                        form.vibes.includes(vibe)
-                          ? "bg-slate-900 text-white ring-slate-900"
-                          : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                      }`}
-                    >
-                      {vibe}
-                    </button>
-                  ))}
-                </div>
+              {/* Step footer */}
+              <div className="border-t border-white/10 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+                {postStep < 2 ? (
+                  <button
+                    type="button"
+                    disabled={!isPostStepValid(postStep)}
+                    onClick={() => withViewTransition(() => setPostStep((s) => (s + 1) as 0 | 1 | 2))}
+                    className="w-full rounded-2xl bg-orange-500 py-3 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-orange-600 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500"
+                  >
+                    Next
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!isFormValid()}
+                    className="w-full rounded-2xl bg-orange-500 py-3 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-orange-600 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500"
+                  >
+                    Post trip
+                  </button>
+                )}
               </div>
-
-              {/* Description */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-500">Bio / description</label>
-                <textarea
-                  value={form.bio}
-                  onChange={(e) => setForm((p) => ({ ...p, bio: e.target.value }))}
-                  placeholder="Tell potential travel partners about your plans, pace, and what you're looking for..."
-                  rows={3}
-                  className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={!isFormValid()}
-                className="mt-1 w-full rounded-xl bg-orange-500 py-3 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-orange-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
-              >
-                Post trip
-              </button>
             </form>
           </div>
         </div>

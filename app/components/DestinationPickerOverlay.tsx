@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { getCountryByCode } from "../lib/geo";
+import { useEffect, useMemo, useState } from "react";
 import { getPopularDestinations } from "../data/popularDestinations";
-import { IconGlobe, IconMapPin, IconSearch, IconX } from "./icons";
+import { useInfiniteHorizontalScroll } from "./useInfiniteHorizontalScroll";
+import DestinationCard from "./DestinationCard";
+import { IconSearch, IconX } from "./icons";
 import type { SearchDestination } from "../page";
 
 type DestinationResults = {
@@ -18,45 +19,25 @@ type DestinationPickerOverlayProps = {
   onQueryChange: (query: string) => void;
   results: DestinationResults;
   destinationKey: (dest: SearchDestination) => string;
+  selectedDestinations: SearchDestination[];
+  closeOnSelect: boolean;
   onSelect: (dest: SearchDestination) => void;
+  onClear: () => void;
   onClose: () => void;
 };
-
-function destinationFlag(dest: SearchDestination): string | undefined {
-  if (dest.type === "country") return getCountryByCode(dest.code)?.flag;
-  if (dest.type === "city") return getCountryByCode(dest.countryCode)?.flag;
-  return undefined;
-}
-
-function DestinationCard({ dest, onSelect }: { dest: SearchDestination; onSelect: () => void }) {
-  const flag = destinationFlag(dest);
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className="flex w-24 shrink-0 snap-center flex-col items-center gap-2 rounded-3xl bg-white/10 px-2 py-4 text-center transition hover:bg-white/20 active:scale-95"
-    >
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-2xl">
-        {flag ?? (dest.type === "region" ? <IconGlobe className="h-6 w-6 text-white" /> : <IconMapPin className="h-6 w-6 text-white" />)}
-      </span>
-      <span className="line-clamp-2 text-xs font-semibold text-white">
-        {dest.name}
-        {dest.type === "city" ? `, ${dest.countryName}` : ""}
-      </span>
-    </button>
-  );
-}
 
 export default function DestinationPickerOverlay({
   query,
   onQueryChange,
   results,
   destinationKey,
+  selectedDestinations,
+  closeOnSelect,
   onSelect,
+  onClear,
   onClose,
 }: DestinationPickerOverlayProps) {
   const [visible, setVisible] = useState(false);
-  const scrollerRef = useRef<HTMLDivElement>(null);
   const isSearching = query.trim().length > 0;
 
   useEffect(() => {
@@ -78,23 +59,16 @@ export default function DestinationPickerOverlay({
   );
 
   const baseItems = isSearching ? searchItems : popular;
-  const displayItems = isSearching ? baseItems : [...baseItems, ...baseItems, ...baseItems];
+  const { scrollerRef, displayItems, handleScroll } = useInfiniteHorizontalScroll(baseItems, !isSearching);
 
-  useLayoutEffect(() => {
-    if (isSearching) return;
-    const el = scrollerRef.current;
-    if (!el) return;
-    el.scrollLeft = el.scrollWidth / 3;
-  }, [isSearching]);
+  const selectedKeys = useMemo(
+    () => new Set(selectedDestinations.map((d) => destinationKey(d))),
+    [selectedDestinations, destinationKey],
+  );
 
-  function handleScroll() {
-    if (isSearching) return;
-    const el = scrollerRef.current;
-    if (!el) return;
-    const singleWidth = el.scrollWidth / 3;
-    if (singleWidth <= 0) return;
-    if (el.scrollLeft < singleWidth * 0.5) el.scrollLeft += singleWidth;
-    else if (el.scrollLeft > singleWidth * 1.5) el.scrollLeft -= singleWidth;
+  function handleSelect(dest: SearchDestination) {
+    onSelect(dest);
+    if (closeOnSelect) onClose();
   }
 
   return (
@@ -128,6 +102,34 @@ export default function DestinationPickerOverlay({
         </button>
       </div>
 
+      {selectedDestinations.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
+          {selectedDestinations.map((d) => (
+            <span
+              key={destinationKey(d)}
+              className="flex items-center gap-1 rounded-full bg-white/15 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white"
+            >
+              {d.name}
+              <button
+                type="button"
+                onClick={() => onSelect(d)}
+                aria-label={`Remove ${d.name}`}
+                className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-white/25"
+              >
+                <IconX className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+          <button
+            type="button"
+            onClick={onClear}
+            className="ml-1 text-xs font-semibold text-slate-300 transition hover:text-white hover:underline"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-1 flex-col justify-center overflow-hidden">
         {displayItems.length === 0 ? (
           <p className="px-4 text-center text-sm text-slate-300">No matches found</p>
@@ -138,7 +140,12 @@ export default function DestinationPickerOverlay({
             className="flex snap-x snap-mandatory gap-4 overflow-x-auto px-[calc(50%-3rem)] py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {displayItems.map((d, i) => (
-              <DestinationCard key={`${destinationKey(d)}-${i}`} dest={d} onSelect={() => onSelect(d)} />
+              <DestinationCard
+                key={`${destinationKey(d)}-${i}`}
+                dest={d}
+                selected={selectedKeys.has(destinationKey(d))}
+                onSelect={() => handleSelect(d)}
+              />
             ))}
           </div>
         )}

@@ -71,7 +71,13 @@ export const REGION_CENTROIDS: Record<Region, { lat: number; lng: number }> = {
 
 const ISO_TO_REGION: Record<string, Region> = {};
 for (const c of worldCountries) {
-  ISO_TO_REGION[c.cca2] = SUBREGION_TO_REGION[c.subregion] ?? REGION_FALLBACK[c.region] ?? "Europe";
+  // Countries with no travel-taxonomy mapping (e.g. UN region "Antarctic": Antarctica,
+  // Bouvet Island, French Southern Territories, South Georgia, Heard/McDonald Islands)
+  // must be left out entirely rather than defaulted to a region — a fallback default
+  // here previously misclassified Antarctica as "Europe", which fed its polygon into
+  // the Europe region-boundary union (see getRegionBoundaries below).
+  const region = SUBREGION_TO_REGION[c.subregion] ?? REGION_FALLBACK[c.region];
+  if (region) ISO_TO_REGION[c.cca2] = region;
 }
 
 // ---------- Real country boundary geometry ----------

@@ -1,14 +1,11 @@
-export type DurationUnit = "Days" | "Weeks" | "Months";
-export type TripDuration = { amount: number; unit: DurationUnit };
-
 type FocusedDateInfo = { mode: "focused"; startDate: string; endDate: string };
-type BroadDateInfo = { mode: "broad"; months: string[]; duration?: TripDuration };
-type FlexibleDateInfo = { mode: "flexible"; earliest: string; latest: string; duration?: TripDuration };
+type BroadDateInfo = { mode: "broad"; months: string[] };
+type FlexibleDateInfo = { mode: "flexible"; earliest: string; latest: string };
 export type PostDate = FocusedDateInfo | BroadDateInfo | FlexibleDateInfo;
 
 export type DateSearchInput =
   | { mode: "specific"; startDate: string; endDate: string }
-  | { mode: "flexible"; months: string[]; duration?: TripDuration };
+  | { mode: "flexible"; months: string[] };
 
 // ---------- Day / month arithmetic ----------
 
@@ -58,12 +55,6 @@ function windowToMonths(start: string, end: string): string[] {
   return months;
 }
 
-export function durationToDays(duration: TripDuration | undefined): number | undefined {
-  if (!duration || !duration.amount) return undefined;
-  const multiplier = duration.unit === "Days" ? 1 : duration.unit === "Weeks" ? 7 : 30;
-  return duration.amount * multiplier;
-}
-
 // ---------- Scenario 1: user searched "Specific Dates" ----------
 
 function scoreSpecificVsFocused(sStart: number, sEnd: number, dS: number, post: FocusedDateInfo): number {
@@ -97,11 +88,10 @@ function scoreSpecificVsFlexible(sStart: number, sEnd: number, dS: number, post:
   const wStart = dayIndex(post.earliest);
   const wEnd = dayIndex(post.latest);
   const windowLength = wEnd - wStart + 1;
-  const pDur = durationToDays(post.duration) ?? windowLength;
 
   if (sStart >= wStart && sEnd <= wEnd) {
     const coverage = 1;
-    const precision = 1 - Math.abs(dS - pDur) / Math.max(dS, pDur);
+    const precision = 1 - Math.abs(dS - windowLength) / Math.max(dS, windowLength);
     const base = 65 * coverage + 35 * precision;
     return base + 15; // window containment bonus
   }
@@ -126,7 +116,7 @@ function scoreSpecificSearch(search: { startDate: string; endDate: string }, pos
 
 // ---------- Scenario 2: user searched "Flexible / Months" ----------
 
-function scoreFlexibleVsFocused(months: string[], sDur: number | undefined, post: FocusedDateInfo): number {
+function scoreFlexibleVsFocused(months: string[], post: FocusedDateInfo): number {
   const pStart = dayIndex(post.startDate);
   const pEnd = dayIndex(post.endDate);
   const dP = inclusiveDayCount(post.startDate, post.endDate);
@@ -134,7 +124,7 @@ function scoreFlexibleVsFocused(months: string[], sDur: number | undefined, post
   if (overlapDaysCount === 0) return 0;
 
   const coverage = overlapDaysCount / dP;
-  const precision = sDur === undefined ? 1 : 1 - Math.abs(sDur - dP) / Math.max(sDur, dP);
+  const precision = 1;
   return 65 * coverage + 35 * precision;
 }
 
@@ -152,25 +142,22 @@ function scoreFlexibleVsBroad(months: string[], post: BroadDateInfo): number {
   return exactMatch ? base + 20 : base;
 }
 
-function scoreFlexibleVsFlexible(months: string[], sDur: number | undefined, post: FlexibleDateInfo): number {
+function scoreFlexibleVsFlexible(months: string[], post: FlexibleDateInfo): number {
   const windowMonths = windowToMonths(post.earliest, post.latest);
   const shared = months.filter((m) => windowMonths.includes(m));
   if (shared.length === 0) return 0;
 
   const coverage = shared.length / months.length;
-  const windowLength = dayIndex(post.latest) - dayIndex(post.earliest) + 1;
-  const pDur = durationToDays(post.duration) ?? windowLength;
-  const precision = sDur === undefined ? 0.8 : 1 - Math.abs(sDur - pDur) / Math.max(sDur, pDur);
+  const precision = 0.8;
   return 65 * coverage + 35 * precision;
 }
 
-function scoreFlexibleSearch(search: { months: string[]; duration?: TripDuration }, post: PostDate): number {
+function scoreFlexibleSearch(search: { months: string[] }, post: PostDate): number {
   if (search.months.length === 0) return 0;
-  const sDur = durationToDays(search.duration);
 
-  if (post.mode === "focused") return scoreFlexibleVsFocused(search.months, sDur, post);
+  if (post.mode === "focused") return scoreFlexibleVsFocused(search.months, post);
   if (post.mode === "broad") return scoreFlexibleVsBroad(search.months, post);
-  return scoreFlexibleVsFlexible(search.months, sDur, post);
+  return scoreFlexibleVsFlexible(search.months, post);
 }
 
 // ---------- Public API ----------
