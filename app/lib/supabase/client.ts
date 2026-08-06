@@ -15,16 +15,30 @@ import { createBrowserClient } from "@supabase/ssr";
 // that actually hit Supabase. Falling back to harmless placeholders keeps the client
 // constructible; any real request against it then fails normally, same as any other
 // misconfigured backend call.
+// None of a Supabase URL, anon key, or Clerk JWT can ever legitimately contain
+// whitespace or surrounding quotes, so it's always safe to strip both — a paste into a
+// dashboard's env var UI can land a newline in the *middle* of a value, or carry over
+// quote characters from a .env/JSON file the value was copied out of. Left in, it rides
+// along as a header (`apikey`/`Authorization`) on every request and fails with "Failed
+// to execute 'set' on 'Headers': Invalid value" instead of a clearer error.
+function sanitizeHeaderValue(value: string): string {
+  return value.replace(/\s+/g, "").replace(/^['"]+|['"]+$/g, "");
+}
+
 export function createClient(getToken?: () => Promise<string | null>) {
-  // .trim() guards against a stray trailing newline/whitespace from pasting the value
-  // into a dashboard's env var UI — since the anon key rides along as a header
-  // (`apikey`) on every request, a hidden control character in it fails with
-  // "Failed to execute 'set' on 'Headers': Invalid value" instead of a clearer error.
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "https://placeholder.supabase.co";
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "placeholder-anon-key";
+  const url = sanitizeHeaderValue(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "") || "https://placeholder.supabase.co";
+  const key = sanitizeHeaderValue(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "") || "placeholder-anon-key";
   return createBrowserClient(
     url,
     key,
-    getToken ? { accessToken: async () => (await getToken())?.trim() ?? null, isSingleton: false } : undefined,
+    getToken
+      ? {
+          accessToken: async () => {
+            const token = await getToken();
+            return token ? sanitizeHeaderValue(token) : null;
+          },
+          isSingleton: false,
+        }
+      : undefined,
   );
 }
