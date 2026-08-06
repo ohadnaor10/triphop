@@ -15,6 +15,7 @@ export type AuthUser = {
   avatar: string;
   avatarUrl: string | null;
   whatsapp: string;
+  email: string;
 };
 
 function initialsOf(name: string): string {
@@ -60,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // uploaded photo as an avatar, so everywhere else can fall back to initials.
       avatarUrl: user.hasImage ? user.imageUrl : null,
       whatsapp: user.primaryPhoneNumber?.phoneNumber ?? "",
+      email: user.primaryEmailAddress?.emailAddress ?? "",
     };
   }, [isSignedIn, user]);
 
@@ -85,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         name: currentUser.name,
         whatsapp: currentUser.whatsapp,
         avatar_url: currentUser.avatarUrl,
+        email: currentUser.email,
       });
       if (upsertError) console.error("Failed to sync profile:", upsertError.message);
       if (cancelled) return;
