@@ -116,7 +116,7 @@ export default function OnboardingPage() {
               onChange={(e) => setAbout(e.target.value)}
               placeholder="A short line about yourself for other travelers…"
               rows={3}
-              className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+              className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
             />
           </div>
 

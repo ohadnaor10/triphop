@@ -16,7 +16,15 @@ import { createBrowserClient } from "@supabase/ssr";
 // constructible; any real request against it then fails normally, same as any other
 // misconfigured backend call.
 export function createClient(getToken?: () => Promise<string | null>) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-anon-key";
-  return createBrowserClient(url, key, getToken ? { accessToken: () => getToken(), isSingleton: false } : undefined);
+  // .trim() guards against a stray trailing newline/whitespace from pasting the value
+  // into a dashboard's env var UI — since the anon key rides along as a header
+  // (`apikey`) on every request, a hidden control character in it fails with
+  // "Failed to execute 'set' on 'Headers': Invalid value" instead of a clearer error.
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || "https://placeholder.supabase.co";
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || "placeholder-anon-key";
+  return createBrowserClient(
+    url,
+    key,
+    getToken ? { accessToken: async () => (await getToken())?.trim() ?? null, isSingleton: false } : undefined,
+  );
 }
