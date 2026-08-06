@@ -196,8 +196,13 @@ export default function ProfilePage() {
                     setBirthDate(e.target.value);
                     setSaved(false);
                   }}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
                 />
+                {birthDate && !isValidBirthDate(birthDate) && (
+                  <p className="mt-1 text-xs text-rose-600">
+                    You must be between {MIN_AGE} and {MAX_AGE} years old.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-500">Gender</label>

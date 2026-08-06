@@ -87,6 +87,11 @@ export default function OnboardingPage() {
               autoFocus
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
             />
+            {birthDate && !isValidBirthDate(birthDate) && (
+              <p className="mt-1 text-xs text-rose-600">
+                You must be between {MIN_AGE} and {MAX_AGE} years old.
+              </p>
+            )}
           </div>
 
           <div>
