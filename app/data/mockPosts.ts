@@ -10,7 +10,8 @@ const AVATAR_COLORS = [
 export const INITIAL_POSTS: Post[] = [
   {
     id: "1",
-    user: { name: "Mia Torres", age: 27, gender: "Woman", avatarColor: AVATAR_COLORS[0] },
+    userId: "dev-user-1",
+    user: { name: "Mia Torres", age: 27, gender: "Female", avatarColor: AVATAR_COLORS[0] },
     destinations: [{ mode: "focused", country: "Argentina", countryCode: "AR", cities: ["El Calafate", "Ushuaia"] }],
     date: { mode: "focused", startDate: "2026-09-05", endDate: "2026-09-20" },
     vibes: ["Backpacking", "Adventure"],
@@ -19,7 +20,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "2",
-    user: { name: "Jonas Weber", age: 31, gender: "Man", avatarColor: AVATAR_COLORS[1] },
+    userId: "seed-user-2",
+    user: { name: "Jonas Weber", age: 31, gender: "Male", avatarColor: AVATAR_COLORS[1] },
     destinations: [{ mode: "focused", country: "Portugal", countryCode: "PT", cities: ["Lisbon", "Porto"] }],
     date: { mode: "flexible", earliest: "2026-10-01", latest: "2026-10-20" },
     vibes: ["Road Trip", "Chill"],
@@ -28,7 +30,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "3",
-    user: { name: "Aiko Sato", age: 24, gender: "Woman", avatarColor: AVATAR_COLORS[2] },
+    userId: "seed-user-3",
+    user: { name: "Aiko Sato", age: 24, gender: "Female", avatarColor: AVATAR_COLORS[2] },
     destinations: [{ mode: "focused", country: "Japan", countryCode: "JP", cities: ["Kyoto", "Kanazawa"] }],
     date: { mode: "broad", months: ["2026-11", "2026-12"] },
     vibes: ["Culture", "Chill"],
@@ -37,7 +40,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "4",
-    user: { name: "Diego Ramirez", age: 29, gender: "Man", avatarColor: AVATAR_COLORS[3] },
+    userId: "seed-user-4",
+    user: { name: "Diego Ramirez", age: 29, gender: "Male", avatarColor: AVATAR_COLORS[3] },
     destinations: [{ mode: "broad", regions: ["Africa", "Middle East"] }],
     date: { mode: "focused", startDate: "2026-08-18", endDate: "2026-08-29" },
     vibes: ["Luxury", "Adventure"],
@@ -46,7 +50,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "5",
-    user: { name: "Sven Halvorsen", age: 34, gender: "Man", avatarColor: AVATAR_COLORS[1] },
+    userId: "seed-user-5",
+    user: { name: "Sven Halvorsen", age: 34, gender: "Male", avatarColor: AVATAR_COLORS[1] },
     destinations: [{ mode: "focused", country: "Iceland", countryCode: "IS", cities: ["Reykjavík", "Grindavík"] }],
     date: { mode: "focused", startDate: "2027-01-10", endDate: "2027-01-17" },
     vibes: ["Chill", "Adventure"],
@@ -55,7 +60,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "6",
-    user: { name: "Freya Nystrom", age: 29, gender: "Woman", avatarColor: AVATAR_COLORS[2] },
+    userId: "seed-user-6",
+    user: { name: "Freya Nystrom", age: 29, gender: "Female", avatarColor: AVATAR_COLORS[2] },
     destinations: [{ mode: "focused", country: "Norway", countryCode: "NO", cities: ["Bergen", "Svolvær"] }],
     date: { mode: "broad", months: ["2027-07", "2027-08"] },
     vibes: ["Adventure", "Chill"],
@@ -64,7 +70,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "7",
-    user: { name: "Tama Ngata", age: 26, gender: "Non-binary", avatarColor: AVATAR_COLORS[3] },
+    userId: "seed-user-7",
+    user: { name: "Tama Ngata", age: 26, gender: "Male", avatarColor: AVATAR_COLORS[3] },
     destinations: [{ mode: "focused", country: "New Zealand", countryCode: "NZ", cities: ["Queenstown", "Wellington"] }],
     date: { mode: "flexible", earliest: "2027-02-01", latest: "2027-03-15" },
     vibes: ["Adventure", "Backpacking"],
@@ -73,7 +80,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "8",
-    user: { name: "Camila Vargas", age: 31, gender: "Woman", avatarColor: AVATAR_COLORS[0] },
+    userId: "seed-user-8",
+    user: { name: "Camila Vargas", age: 31, gender: "Female", avatarColor: AVATAR_COLORS[0] },
     destinations: [{ mode: "focused", country: "Costa Rica", countryCode: "CR", cities: ["Tilarán", "Liberia"] }],
     date: { mode: "focused", startDate: "2026-12-05", endDate: "2026-12-15" },
     vibes: ["Chill", "Backpacking"],
@@ -82,7 +90,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "9",
-    user: { name: "Minh Tran", age: 24, gender: "Man", avatarColor: AVATAR_COLORS[1] },
+    userId: "seed-user-9",
+    user: { name: "Minh Tran", age: 24, gender: "Male", avatarColor: AVATAR_COLORS[1] },
     destinations: [{
       mode: "focused",
       country: "Vietnam",
@@ -99,7 +108,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "10",
-    user: { name: "Eleni Papadopoulos", age: 37, gender: "Woman", avatarColor: AVATAR_COLORS[2] },
+    userId: "seed-user-10",
+    user: { name: "Eleni Papadopoulos", age: 37, gender: "Female", avatarColor: AVATAR_COLORS[2] },
     destinations: [{ mode: "focused", country: "Greece", countryCode: "GR", cities: ["Firá", "Athens"] }],
     date: { mode: "focused", startDate: "2026-09-12", endDate: "2026-09-22" },
     vibes: ["Luxury", "Chill"],
@@ -108,7 +118,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "11",
-    user: { name: "Pemba Sherpa", age: 28, gender: "Man", avatarColor: AVATAR_COLORS[3] },
+    userId: "seed-user-11",
+    user: { name: "Pemba Sherpa", age: 28, gender: "Male", avatarColor: AVATAR_COLORS[3] },
     destinations: [{ mode: "focused", country: "Nepal", countryCode: "NP", cities: ["Kathmandu", "Namche Bazar"] }],
     date: { mode: "flexible", earliest: "2026-10-05", latest: "2026-11-05" },
     vibes: ["Adventure", "Backpacking"],
@@ -117,7 +128,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "12",
-    user: { name: "Ivana Kovac", age: 30, gender: "Woman", avatarColor: AVATAR_COLORS[0] },
+    userId: "seed-user-12",
+    user: { name: "Ivana Kovac", age: 30, gender: "Female", avatarColor: AVATAR_COLORS[0] },
     destinations: [{ mode: "focused", country: "Croatia", countryCode: "HR", cities: ["Grad Dubrovnik", "Split"] }],
     date: { mode: "broad", months: ["2027-06", "2027-07", "2027-08"] },
     vibes: ["Chill", "Culture"],
@@ -126,7 +138,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "13",
-    user: { name: "Jiho Park", age: 27, gender: "Non-binary", avatarColor: AVATAR_COLORS[1] },
+    userId: "seed-user-13",
+    user: { name: "Jiho Park", age: 27, gender: "Male", avatarColor: AVATAR_COLORS[1] },
     destinations: [{ mode: "focused", country: "South Korea", countryCode: "KR", cities: ["Seoul", "Busan"] }],
     date: { mode: "focused", startDate: "2027-03-20", endDate: "2027-03-30" },
     vibes: ["Culture", "Chill"],
@@ -135,7 +148,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "14",
-    user: { name: "Cormac Byrne", age: 33, gender: "Man", avatarColor: AVATAR_COLORS[2] },
+    userId: "seed-user-14",
+    user: { name: "Cormac Byrne", age: 33, gender: "Male", avatarColor: AVATAR_COLORS[2] },
     destinations: [{ mode: "focused", country: "Ireland", countryCode: "IE", cities: ["Dublin", "Ennis"] }],
     date: { mode: "flexible", earliest: "2026-09-01", latest: "2026-09-25" },
     vibes: ["Road Trip", "Chill"],
@@ -144,7 +158,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "15",
-    user: { name: "Rowan MacLeod", age: 25, gender: "Prefer not to say", avatarColor: AVATAR_COLORS[3] },
+    userId: "seed-user-15",
+    user: { name: "Rowan MacLeod", age: 25, gender: "Male", avatarColor: AVATAR_COLORS[3] },
     destinations: [{
       mode: "focused",
       country: "United Kingdom",
@@ -158,7 +173,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "16",
-    user: { name: "Valentina Rojas", age: 29, gender: "Woman", avatarColor: AVATAR_COLORS[0] },
+    userId: "seed-user-16",
+    user: { name: "Valentina Rojas", age: 29, gender: "Female", avatarColor: AVATAR_COLORS[0] },
     destinations: [{ mode: "focused", country: "Peru", countryCode: "PE", cities: ["Cusco", "Ollantaytambo"] }],
     date: { mode: "focused", startDate: "2026-11-02", endDate: "2026-11-12" },
     vibes: ["Backpacking", "Adventure", "Culture"],
@@ -167,7 +183,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "17",
-    user: { name: "Marco dela Cruz", age: 23, gender: "Man", avatarColor: AVATAR_COLORS[1] },
+    userId: "seed-user-17",
+    user: { name: "Marco dela Cruz", age: 23, gender: "Male", avatarColor: AVATAR_COLORS[1] },
     destinations: [{ mode: "focused", country: "Philippines", countryCode: "PH", cities: ["Puerto Princesa", "Dapa"] }],
     date: { mode: "flexible", earliest: "2027-01-05", latest: "2027-01-25" },
     vibes: ["Chill", "Backpacking"],
@@ -176,7 +193,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "18",
-    user: { name: "Isabela Restrepo", age: 32, gender: "Woman", avatarColor: AVATAR_COLORS[2] },
+    userId: "seed-user-18",
+    user: { name: "Isabela Restrepo", age: 32, gender: "Female", avatarColor: AVATAR_COLORS[2] },
     destinations: [{ mode: "focused", country: "Colombia", countryCode: "CO", cities: ["Medellín", "Cartagena de Indias"] }],
     date: { mode: "focused", startDate: "2026-10-08", endDate: "2026-10-18" },
     vibes: ["Culture", "Road Trip"],
@@ -185,7 +203,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "19",
-    user: { name: "Nadia Haddad", age: 36, gender: "Woman", avatarColor: AVATAR_COLORS[3] },
+    userId: "seed-user-19",
+    user: { name: "Nadia Haddad", age: 36, gender: "Female", avatarColor: AVATAR_COLORS[3] },
     destinations: [{ mode: "broad", regions: ["Europe", "Middle East"] }],
     date: { mode: "broad", months: ["2027-03"] },
     vibes: ["Luxury", "Culture"],
@@ -194,7 +213,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "20",
-    user: { name: "Lucas Bernard", age: 28, gender: "Man", avatarColor: AVATAR_COLORS[0] },
+    userId: "seed-user-20",
+    user: { name: "Lucas Bernard", age: 28, gender: "Male", avatarColor: AVATAR_COLORS[0] },
     destinations: [
       { mode: "focused", country: "France", countryCode: "FR", cities: ["Paris", "Chamonix-Mont-Blanc"] },
       { mode: "focused", country: "Switzerland", countryCode: "CH", cities: ["Zermatt", "Interlaken"] },
@@ -206,7 +226,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "21",
-    user: { name: "Priya Nair", age: 26, gender: "Woman", avatarColor: AVATAR_COLORS[1] },
+    userId: "seed-user-21",
+    user: { name: "Priya Nair", age: 26, gender: "Female", avatarColor: AVATAR_COLORS[1] },
     destinations: [{ mode: "focused", country: "India", countryCode: "IN", cities: ["Jaipur", "Udaipur", "Jodhpur"] }],
     date: { mode: "broad", months: ["2026-12", "2027-01", "2027-02"] },
     vibes: ["Culture", "Backpacking"],
@@ -215,7 +236,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "22",
-    user: { name: "Elias Roth", age: 41, gender: "Man", avatarColor: AVATAR_COLORS[2] },
+    userId: "seed-user-22",
+    user: { name: "Elias Roth", age: 41, gender: "Male", avatarColor: AVATAR_COLORS[2] },
     destinations: [{ mode: "broad", regions: ["South America"] }],
     date: { mode: "flexible", earliest: "2027-02-10", latest: "2027-04-01" },
     vibes: ["Backpacking", "Adventure"],
@@ -224,7 +246,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "23",
-    user: { name: "Hana Kobayashi", age: 30, gender: "Woman", avatarColor: AVATAR_COLORS[3] },
+    userId: "seed-user-23",
+    user: { name: "Hana Kobayashi", age: 30, gender: "Female", avatarColor: AVATAR_COLORS[3] },
     destinations: [{ mode: "focused", country: "Thailand", countryCode: "TH", cities: ["Bangkok", "Chiang Mai", "Ko Lanta"] }],
     date: { mode: "focused", startDate: "2027-01-15", endDate: "2027-01-29" },
     vibes: ["Chill", "Culture"],
@@ -233,7 +256,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "24",
-    user: { name: "Otto Fischer", age: 45, gender: "Man", avatarColor: AVATAR_COLORS[0] },
+    userId: "seed-user-24",
+    user: { name: "Otto Fischer", age: 45, gender: "Male", avatarColor: AVATAR_COLORS[0] },
     destinations: [{ mode: "broad", regions: ["Europe"] }],
     date: { mode: "broad", months: ["2027-06", "2027-07"] },
     vibes: ["Road Trip", "Culture"],
@@ -242,7 +266,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "25",
-    user: { name: "Zoe Adler", age: 22, gender: "Non-binary", avatarColor: AVATAR_COLORS[1] },
+    userId: "seed-user-25",
+    user: { name: "Zoe Adler", age: 22, gender: "Male", avatarColor: AVATAR_COLORS[1] },
     destinations: [{ mode: "focused", country: "Australia", countryCode: "AU", cities: ["Sydney", "Byron Bay", "Cairns"] }],
     date: { mode: "flexible", earliest: "2027-04-01", latest: "2027-06-15" },
     vibes: ["Backpacking", "Adventure"],
@@ -251,7 +276,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "26",
-    user: { name: "Farah Youssef", age: 33, gender: "Woman", avatarColor: AVATAR_COLORS[2] },
+    userId: "seed-user-26",
+    user: { name: "Farah Youssef", age: 33, gender: "Female", avatarColor: AVATAR_COLORS[2] },
     destinations: [{ mode: "focused", country: "Morocco", countryCode: "MA", cities: ["Marrakech", "Chefchaouene", "Errachidia"] }],
     date: { mode: "focused", startDate: "2026-10-20", endDate: "2026-10-30" },
     vibes: ["Culture", "Adventure"],
@@ -260,7 +286,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "27",
-    user: { name: "Kian Delgado", age: 27, gender: "Man", avatarColor: AVATAR_COLORS[3] },
+    userId: "seed-user-27",
+    user: { name: "Kian Delgado", age: 27, gender: "Male", avatarColor: AVATAR_COLORS[3] },
     destinations: [{ mode: "focused", country: "Mexico", countryCode: "MX", cities: ["Oaxaca", "Ciudad de México", "Tulum"] }],
     date: { mode: "broad", months: ["2026-11", "2026-12"] },
     vibes: ["Culture", "Chill"],
@@ -269,7 +296,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "28",
-    user: { name: "Linnea Karlsson", age: 25, gender: "Woman", avatarColor: AVATAR_COLORS[0] },
+    userId: "seed-user-28",
+    user: { name: "Linnea Karlsson", age: 25, gender: "Female", avatarColor: AVATAR_COLORS[0] },
     destinations: [{ mode: "focused", country: "Canada", countryCode: "CA", cities: ["Banff", "Jasper Park Lodge", "Vancouver"] }],
     date: { mode: "focused", startDate: "2027-07-05", endDate: "2027-07-19" },
     vibes: ["Adventure", "Road Trip"],
@@ -278,7 +306,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "29",
-    user: { name: "Renata Silva", age: 34, gender: "Woman", avatarColor: AVATAR_COLORS[1] },
+    userId: "seed-user-29",
+    user: { name: "Renata Silva", age: 34, gender: "Female", avatarColor: AVATAR_COLORS[1] },
     destinations: [{ mode: "focused", country: "Brazil", countryCode: "BR", cities: ["Rio de Janeiro", "Ilha Grande"] }],
     date: { mode: "flexible", earliest: "2027-01-02", latest: "2027-02-10" },
     vibes: ["Chill", "Adventure"],
@@ -287,7 +316,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "30",
-    user: { name: "Amara Boateng", age: 29, gender: "Woman", avatarColor: AVATAR_COLORS[2] },
+    userId: "seed-user-30",
+    user: { name: "Amara Boateng", age: 29, gender: "Female", avatarColor: AVATAR_COLORS[2] },
     destinations: [{ mode: "broad", regions: ["Africa"] }],
     date: { mode: "broad", months: ["2027-06", "2027-07", "2027-08"] },
     vibes: ["Adventure", "Luxury"],
@@ -296,7 +326,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "31",
-    user: { name: "Théo Laurent", age: 30, gender: "Man", avatarColor: AVATAR_COLORS[3] },
+    userId: "seed-user-31",
+    user: { name: "Théo Laurent", age: 30, gender: "Male", avatarColor: AVATAR_COLORS[3] },
     destinations: [
       { mode: "focused", country: "Italy", countryCode: "IT", cities: ["Rome", "Florence", "Venice"] },
       { mode: "focused", country: "Slovenia", countryCode: "SI", cities: ["Ljubljana", "Bled"] },
@@ -308,7 +339,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "32",
-    user: { name: "Grace Mwangi", age: 24, gender: "Woman", avatarColor: AVATAR_COLORS[0] },
+    userId: "seed-user-32",
+    user: { name: "Grace Mwangi", age: 24, gender: "Female", avatarColor: AVATAR_COLORS[0] },
     destinations: [{ mode: "focused", country: "Indonesia", countryCode: "ID", cities: ["Ubud", "Kuta", "Klungkung"] }],
     date: { mode: "broad", months: ["2027-03", "2027-04"] },
     vibes: ["Chill", "Backpacking"],
@@ -317,7 +349,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "33",
-    user: { name: "Dimitri Volkov", age: 38, gender: "Man", avatarColor: AVATAR_COLORS[1] },
+    userId: "seed-user-33",
+    user: { name: "Dimitri Volkov", age: 38, gender: "Male", avatarColor: AVATAR_COLORS[1] },
     destinations: [{ mode: "focused", country: "Germany", countryCode: "DE", cities: ["Berlin", "Munich"] }],
     date: { mode: "flexible", earliest: "2026-12-10", latest: "2027-01-05" },
     vibes: ["Culture", "Chill"],
@@ -326,7 +359,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "34",
-    user: { name: "Naledi Dlamini", age: 27, gender: "Woman", avatarColor: AVATAR_COLORS[2] },
+    userId: "seed-user-34",
+    user: { name: "Naledi Dlamini", age: 27, gender: "Female", avatarColor: AVATAR_COLORS[2] },
     destinations: [{ mode: "focused", country: "South Africa", countryCode: "ZA", cities: ["Cape Town", "Stellenbosch", "Hermanus"] }],
     date: { mode: "focused", startDate: "2026-11-14", endDate: "2026-11-24" },
     vibes: ["Luxury", "Adventure"],
@@ -335,7 +369,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "35",
-    user: { name: "Yusuf Demir", age: 31, gender: "Man", avatarColor: AVATAR_COLORS[3] },
+    userId: "seed-user-35",
+    user: { name: "Yusuf Demir", age: 31, gender: "Male", avatarColor: AVATAR_COLORS[3] },
     destinations: [{ mode: "focused", country: "Turkey", countryCode: "TR", cities: ["Fatih", "Göreme", "Antalya"] }],
     date: { mode: "broad", months: ["2026-09", "2026-10"] },
     vibes: ["Culture", "Adventure"],
@@ -344,7 +379,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "36",
-    user: { name: "Sofia Moretti", age: 26, gender: "Woman", avatarColor: AVATAR_COLORS[0] },
+    userId: "seed-user-36",
+    user: { name: "Sofia Moretti", age: 26, gender: "Female", avatarColor: AVATAR_COLORS[0] },
     destinations: [{ mode: "broad", regions: ["East Asia/SE Asia"] }],
     date: { mode: "flexible", earliest: "2026-10-15", latest: "2026-12-01" },
     vibes: ["Backpacking", "Culture"],
@@ -353,7 +389,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "37",
-    user: { name: "Connor Walsh", age: 36, gender: "Man", avatarColor: AVATAR_COLORS[1] },
+    userId: "seed-user-37",
+    user: { name: "Connor Walsh", age: 36, gender: "Male", avatarColor: AVATAR_COLORS[1] },
     destinations: [{ mode: "focused", country: "Chile", countryCode: "CL", cities: ["Santiago", "Torres del Paine"] }],
     date: { mode: "focused", startDate: "2027-02-15", endDate: "2027-02-28" },
     vibes: ["Adventure", "Backpacking"],
@@ -362,7 +399,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "38",
-    user: { name: "Amelia Ferreira", age: 29, gender: "Woman", avatarColor: AVATAR_COLORS[2] },
+    userId: "seed-user-38",
+    user: { name: "Amelia Ferreira", age: 29, gender: "Female", avatarColor: AVATAR_COLORS[2] },
     destinations: [
       { mode: "focused", country: "Spain", countryCode: "ES", cities: ["Barcelona", "Sevilla"] },
       { mode: "focused", country: "Morocco", countryCode: "MA", cities: ["Tangier"] },
@@ -374,7 +412,8 @@ export const INITIAL_POSTS: Post[] = [
   },
   {
     id: "39",
-    user: { name: "Noah Bergström", age: 32, gender: "Man", avatarColor: AVATAR_COLORS[3] },
+    userId: "seed-user-39",
+    user: { name: "Noah Bergström", age: 32, gender: "Male", avatarColor: AVATAR_COLORS[3] },
     destinations: [{ mode: "broad", regions: ["North America"] }],
     date: { mode: "broad", months: ["2027-09", "2027-10"] },
     vibes: ["Road Trip", "Adventure"],

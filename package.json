@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.6.5",
+    "@supabase/ssr": "^0.12.4",
+    "@supabase/supabase-js": "^2.112.0",
     "@turf/turf": "^7.3.5",
     "@types/mapbox-gl": "^3.4.1",
     "country-state-city": "^3.2.1",

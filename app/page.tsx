@@ -1,24 +1,29 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState, type SubmitEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState, type SubmitEvent } from "react";
 import { flushSync } from "react-dom";
 import {
   IconCalendar,
   IconChevronLeft,
+  IconEdit,
   IconGlobe,
   IconGrid,
   IconHeart,
+  IconLogOut,
   IconMap,
   IconMapPin,
   IconPlus,
   IconSearch,
   IconSliders,
+  IconTrash,
   IconUser,
   IconWhatsApp,
   IconX,
 } from "./components/icons";
 import type { FeedMapPoint, FeedMapPost } from "./components/TripMap";
+import Avatar from "./components/Avatar";
 import Combobox from "./components/Combobox";
 import CalendarRangePicker from "./components/CalendarRangePicker";
 import DestinationPickerOverlay from "./components/DestinationPickerOverlay";
@@ -41,7 +46,8 @@ import {
   type Region,
 } from "./lib/geo";
 import { hasActiveDateSearch, rankByRelevance, type DateSearchInput } from "./lib/relevance";
-import { INITIAL_POSTS } from "./data/mockPosts";
+import { useAuth } from "./context/AuthContext";
+import { usePostsStore } from "./lib/postsStore";
 
 const TripMap = dynamic(() => import("./components/TripMap"), {
   ssr: false,
@@ -61,13 +67,17 @@ const TripDestinationsMap = dynamic(() => import("./components/TripDestinationsM
 
 export type TripVibe = "Backpacking" | "Road Trip" | "Luxury" | "Chill" | "Adventure" | "Culture";
 
-export type Gender = "Woman" | "Man" | "Non-binary" | "Prefer not to say";
+export type Gender = "Male" | "Female";
 
 export type UserProfile = {
   name: string;
   age: number;
   gender: Gender;
   avatarColor: string;
+  /** Absent for older mock seed data that predates profile photos. */
+  avatarUrl?: string | null;
+  /** Optional "about me" bio — distinct from a post's own trip-specific bio. */
+  about?: string;
 };
 
 export type FocusedDestination = { mode: "focused"; country: string; countryCode: string; cities: string[] };
@@ -81,18 +91,21 @@ export type TripDate = FocusedDateInfo | BroadDateInfo | FlexibleDateInfo;
 
 export type Post = {
   id: string;
+  userId: string;
   user: UserProfile;
   destinations: Destination[];
   date: TripDate;
   vibes: TripVibe[];
   bio: string;
   whatsapp: string;
+  /** ISO timestamp of when the post was created. Optional since older mock seed data predates this field. */
+  createdAt?: string;
 };
 
 // ---------- Static reference data ----------
 
 const TRIP_STYLES: TripVibe[] = ["Backpacking", "Road Trip", "Luxury", "Chill", "Adventure", "Culture"];
-const GENDERS: Gender[] = ["Woman", "Man", "Non-binary", "Prefer not to say"];
+const GENDERS: Gender[] = ["Male", "Female"];
 
 const VIBE_STYLES: Record<TripVibe, string> = {
   Backpacking: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
@@ -101,20 +114,6 @@ const VIBE_STYLES: Record<TripVibe, string> = {
   Chill: "bg-sky-50 text-sky-700 ring-sky-600/20",
   Adventure: "bg-rose-50 text-rose-700 ring-rose-600/20",
   Culture: "bg-orange-50 text-orange-700 ring-orange-600/20",
-};
-
-const AVATAR_COLORS = [
-  "bg-gradient-to-br from-orange-400 to-pink-500",
-  "bg-gradient-to-br from-sky-400 to-indigo-500",
-  "bg-gradient-to-br from-emerald-400 to-teal-500",
-  "bg-gradient-to-br from-fuchsia-400 to-purple-500",
-];
-
-const CURRENT_USER: UserProfile = {
-  name: "Alex Rivera",
-  age: 26,
-  gender: "Non-binary",
-  avatarColor: AVATAR_COLORS[2],
 };
 
 // ---------- Formatting helpers ----------
@@ -128,6 +127,21 @@ function formatDateRange(start: string, end: string) {
 
 function formatMonth(ym: string) {
   return new Date(`${ym}-01`).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+// "Posted X ago" — shown only in the full post-detail view, not on preview cards.
+function formatRelativeTime(iso: string): string {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const months = Math.round(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? "" : "s"} ago`;
+  const years = Math.round(months / 12);
+  return `${years} year${years === 1 ? "" : "s"} ago`;
 }
 
 function shortMonthName(year: string, month: number) {
@@ -186,22 +200,44 @@ function formatMonthsCompact(months: string[]): string {
 }
 
 function formatGender(gender: Gender): string {
-  if (gender === "Woman") return "F";
-  if (gender === "Man") return "M";
-  return gender;
+  return gender === "Male" ? "M" : "F";
 }
+
+// Caps how much of a single destination's city list gets spelled out before folding
+// the rest into a "+N" count — a country with a dozen cities picked would otherwise
+// turn every label showing it into a wall of text.
+const MAX_CITIES_PER_DESTINATION = 3;
 
 function getSingleDestinationLabel(destination: Destination): string {
   if (destination.mode === "focused") {
-    return destination.cities.length > 0
-      ? `${destination.country} — ${destination.cities.join(", ")}`
-      : destination.country;
+    if (destination.cities.length === 0) return destination.country;
+    const shown = destination.cities.slice(0, MAX_CITIES_PER_DESTINATION);
+    const extra = destination.cities.length - shown.length;
+    const cities = extra > 0 ? `${shown.join(", ")} +${extra}` : shown.join(", ");
+    return `${destination.country} — ${cities}`;
   }
   return destination.regions.join(" · ");
 }
 
+// Single-line summary for compact contexts (feed cards, map popups) — caps the number
+// of destinations spelled out the same way getSingleDestinationLabel caps cities, so a
+// post with many countries/regions still reads as one short line.
+const MAX_DESTINATIONS_COMPACT = 2;
+
 function getDestinationLabel(destinations: Destination[]): string {
-  return destinations.map(getSingleDestinationLabel).join("  +  ");
+  const shown = destinations.slice(0, MAX_DESTINATIONS_COMPACT);
+  const extra = destinations.length - shown.length;
+  const label = shown.map(getSingleDestinationLabel).join("  +  ");
+  return extra > 0 ? `${label}  +${extra} more` : label;
+}
+
+// Chip list for the full post-detail view — more room than a single line, so more
+// destinations are spelled out before folding into a "+N more" chip.
+const MAX_DESTINATION_CHIPS = 6;
+
+function getDestinationChips(destinations: Destination[]): { chips: string[]; moreCount: number } {
+  const shown = destinations.slice(0, MAX_DESTINATION_CHIPS);
+  return { chips: shown.map(getSingleDestinationLabel), moreCount: destinations.length - shown.length };
 }
 
 export type SearchDestination =
@@ -449,9 +485,26 @@ function withViewTransition(fn: () => void) {
   }
 }
 
+// useSearchParams() (used below to open a post via /?post=<id>, see the profile page's
+// "My posts" links) requires a Suspense boundary around anything that reads it.
 export default function HomePage() {
+  return (
+    <Suspense>
+      <HomePageContent />
+    </Suspense>
+  );
+}
+
+function HomePageContent() {
+  const { currentUser, logout, requireAuth } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { posts, savedPostIds, addPost, editPost, removePost, toggleSaved, revealContact } = usePostsStore();
+  const [revealedContact, setRevealedContact] = useState<string | null>(null);
   const [view, setView] = useState<"feed" | "map">("feed");
-  const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
+  const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
   const [selectedDestinations, setSelectedDestinations] = useState<SearchDestination[]>([]);
   const [destinationPickerCloseOnSelect, setDestinationPickerCloseOnSelect] = useState(true);
   const [destinationQuery, setDestinationQuery] = useState("");
@@ -459,13 +512,14 @@ export default function HomePage() {
   const [appliedDateSearch, setAppliedDateSearch] = useState<DateSearchUI | null>(null);
   const [dateSearchDraft, setDateSearchDraft] = useState<DateSearchUI>(EMPTY_DATE_SEARCH);
   const [genderFilter, setGenderFilter] = useState<Gender | "All">("All");
+  const [ageMinFilter, setAgeMinFilter] = useState("");
+  const [ageMaxFilter, setAgeMaxFilter] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [postStep, setPostStep] = useState<0 | 1 | 2>(0);
   const [postDestQuery, setPostDestQuery] = useState("");
   const [viewPostId, setViewPostId] = useState<string | null>(null);
   const [isTripMapOpen, setIsTripMapOpen] = useState(false);
   const [tripMapPoints, setTripMapPoints] = useState<GeoPoint[]>([]);
-  const [savedPostIds, setSavedPostIds] = useState<Set<string>>(new Set());
   const [showSavedOnly, setShowSavedOnly] = useState(false);
   const [openHeroField, setOpenHeroField] = useState<"destination" | "dates" | "filters" | null>(null);
   // Whether the user has performed their first search yet — gates the full-screen,
@@ -476,8 +530,26 @@ export default function HomePage() {
   const heroRef = useRef<HTMLDivElement>(null);
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [postError, setPostError] = useState<string | null>(null);
+  const [isSavingPost, setIsSavingPost] = useState(false);
 
   const monthOptions = useMemo(() => monthRangeOptions(2, 2), []);
+
+  // Opens straight to a post's detail view when arriving via /?post=<id> — used by the
+  // "My posts" list on the profile page, which has no post-detail UI of its own. Applied
+  // synchronously during render (not an effect) per the same pattern used elsewhere in
+  // this file for syncing external state — see revealedForPostId below.
+  const postParam = searchParams.get("post");
+  const [handledPostParam, setHandledPostParam] = useState<string | null>(null);
+  if (postParam && postParam !== handledPostParam) {
+    setHandledPostParam(postParam);
+    setHasSearched(true);
+    setViewPostId(postParam);
+  }
+
+  useEffect(() => {
+    if (handledPostParam) router.replace("/");
+  }, [handledPostParam, router]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -489,15 +561,59 @@ export default function HomePage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  function toggleSavedPost(postId: string) {
-    setSavedPostIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(postId)) {
-        next.delete(postId);
-      } else {
-        next.add(postId);
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setShowProfileMenu(false);
       }
-      return next;
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  function toggleSavedPost(postId: string) {
+    requireAuth(() => {
+      toggleSaved(postId);
+    });
+  }
+
+  function clearMoreFilters() {
+    setVibeFilter("All");
+    setGenderFilter("All");
+    setAgeMinFilter("");
+    setAgeMaxFilter("");
+  }
+
+  function deletePost(postId: string) {
+    requireAuth(() => {
+      removePost(postId);
+      setViewPostId((id) => (id === postId ? null : id));
+    });
+  }
+
+  function startEditPost(post: Post) {
+    requireAuth(() => {
+      setForm({
+        destinations: post.destinations.flatMap((d): DestinationEntry[] =>
+          d.mode === "focused"
+            ? [{ kind: "country", country: d.country, countryCode: d.countryCode, cities: d.cities }]
+            : d.regions.map((region) => ({ kind: "region", region })),
+        ),
+        dates:
+          post.date.mode === "focused"
+            ? { mode: "specific", startDate: post.date.startDate, endDate: post.date.endDate, months: [] }
+            : post.date.mode === "flexible"
+              ? { mode: "specific", startDate: post.date.earliest, endDate: post.date.latest, months: [] }
+              : { mode: "flexible", startDate: "", endDate: "", months: post.date.months },
+        vibes: post.vibes,
+        bio: post.bio,
+      });
+      setEditingPostId(post.id);
+      setPostStep(0);
+      setPostDestQuery("");
+      setPostError(null);
+      setViewPostId(null);
+      setIsModalOpen(true);
     });
   }
 
@@ -533,8 +649,11 @@ export default function HomePage() {
       const matchesRegion = postMatchesDestinationSearch(post.destinations, selectedDestinations);
       const matchesVibe = vibeFilter === "All" || post.vibes.includes(vibeFilter);
       const matchesGender = genderFilter === "All" || post.user.gender === genderFilter;
+      const ageMin = ageMinFilter.trim() === "" ? null : Number(ageMinFilter);
+      const ageMax = ageMaxFilter.trim() === "" ? null : Number(ageMaxFilter);
+      const matchesAge = (ageMin === null || post.user.age >= ageMin) && (ageMax === null || post.user.age <= ageMax);
       const matchesSaved = !showSavedOnly || savedPostIds.has(post.id);
-      return matchesRegion && matchesVibe && matchesGender && matchesSaved;
+      return matchesRegion && matchesVibe && matchesGender && matchesAge && matchesSaved;
     });
 
     if (!appliedDateSearch) return base;
@@ -549,6 +668,8 @@ export default function HomePage() {
     selectedDestinations,
     vibeFilter,
     genderFilter,
+    ageMinFilter,
+    ageMaxFilter,
     showSavedOnly,
     savedPostIds,
     appliedDateSearch,
@@ -556,6 +677,18 @@ export default function HomePage() {
   ]);
 
   const viewPost = posts.find((p) => p.id === viewPostId) ?? null;
+  const viewPostDestinationChips = useMemo(
+    () => (viewPost ? getDestinationChips(viewPost.destinations) : null),
+    [viewPost],
+  );
+
+  // Reset the revealed contact synchronously on render when the viewed post changes,
+  // rather than in an effect (https://react.dev/learn/you-might-not-need-an-effect).
+  const [revealedForPostId, setRevealedForPostId] = useState<string | null>(null);
+  if (viewPostId !== revealedForPostId) {
+    setRevealedForPostId(viewPostId);
+    setRevealedContact(null);
+  }
 
   useEffect(() => {
     if (!viewPost || !isTripMapOpen) return;
@@ -776,9 +909,14 @@ export default function HomePage() {
   }
 
   function openPostModal() {
-    setPostStep(0);
-    setPostDestQuery("");
-    setIsModalOpen(true);
+    requireAuth(() => {
+      resetForm();
+      setEditingPostId(null);
+      setPostStep(0);
+      setPostDestQuery("");
+      setPostError(null);
+      setIsModalOpen(true);
+    });
   }
 
   function handleSubmit(e: SubmitEvent) {
@@ -805,19 +943,22 @@ export default function HomePage() {
         ? { mode: "focused", startDate: form.dates.startDate, endDate: form.dates.endDate }
         : { mode: "broad", months: form.dates.months };
 
-    const newPost: Post = {
-      id: crypto.randomUUID(),
-      user: CURRENT_USER,
-      destinations,
-      date,
-      vibes: form.vibes,
-      bio: form.bio,
-      whatsapp: "https://wa.me/10000000000",
-    };
-
-    setPosts((prev) => [newPost, ...prev]);
-    resetForm();
-    setIsModalOpen(false);
+    requireAuth(() => {
+      setPostError(null);
+      setIsSavingPost(true);
+      const input = { destinations, date, vibes: form.vibes, bio: form.bio };
+      const save = editingPostId ? editPost(editingPostId, input) : addPost(input);
+      save.then((error) => {
+        setIsSavingPost(false);
+        if (error) {
+          setPostError(error);
+          return;
+        }
+        resetForm();
+        setEditingPostId(null);
+        setIsModalOpen(false);
+      });
+    });
   }
 
   // Destination/dates trigger buttons + their dropdown panels are shared between the
@@ -1140,13 +1281,73 @@ export default function HomePage() {
               >
                 <IconHeart className="h-4.5 w-4.5" filled={showSavedOnly} />
               </button>
-              <button
-                type="button"
-                aria-label="Profile"
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition active:scale-95 active:bg-slate-200"
-              >
-                <IconUser className="h-4.5 w-4.5" />
-              </button>
+              {!currentUser && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => router.push("/sign-in")}
+                    className="rounded-full px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-50 active:scale-95"
+                  >
+                    Log in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/sign-up")}
+                    className="rounded-full bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition active:scale-95 active:bg-orange-600"
+                  >
+                    Sign up
+                  </button>
+                </div>
+              )}
+              {currentUser && (
+                <div ref={profileMenuRef} className="relative">
+                  <button
+                    type="button"
+                    aria-label="Profile"
+                    aria-haspopup="menu"
+                    aria-expanded={showProfileMenu}
+                    onClick={() => setShowProfileMenu((v) => !v)}
+                    className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-xs font-bold text-slate-600 transition active:scale-95 active:bg-slate-200"
+                  >
+                    <Avatar url={currentUser.avatarUrl} initials={currentUser.avatar} className="h-9 w-9 text-xs" />
+                  </button>
+
+                  {showProfileMenu && (
+                    <div
+                      role="menu"
+                      className="absolute right-0 z-50 mt-2 w-48 overflow-hidden rounded-2xl border border-slate-200 bg-white py-1 shadow-lg"
+                    >
+                      <div className="border-b border-slate-100 px-3 py-2">
+                        <p className="truncate text-sm font-semibold text-slate-900">{currentUser.name}</p>
+                      </div>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setShowProfileMenu(false);
+                          router.push("/profile");
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+                      >
+                        <IconUser className="h-4 w-4 text-slate-400" />
+                        My Profile
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          logout();
+                          setShowProfileMenu(false);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 transition hover:bg-rose-50"
+                      >
+                        <IconLogOut className="h-4 w-4" />
+                        Log out
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -1174,57 +1375,96 @@ export default function HomePage() {
             {renderDestinationPanel()}
             {renderDatesPanel()}
 
+            {/* "More filters" as an inline row pushing content down, rather than a
+                floating dropdown — merges the trip-style filter in alongside gender
+                and age, all in one place. */}
             {openHeroField === "filters" && (
-              <div className="absolute right-4 z-50 mt-2 flex w-56 flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">More filters</p>
+              <div className="mt-2 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">More filters</p>
+                  <button
+                    type="button"
+                    onClick={clearMoreFilters}
+                    className="text-xs font-semibold text-slate-400 transition hover:text-slate-700 hover:underline"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setVibeFilter("All")}
+                    className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
+                      vibeFilter === "All"
+                        ? "bg-slate-900 text-white ring-slate-900"
+                        : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    All styles
+                  </button>
+                  {TRIP_STYLES.map((vibe) => (
+                    <button
+                      key={vibe}
+                      type="button"
+                      onClick={() => setVibeFilter(vibe)}
+                      className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
+                        vibeFilter === vibe
+                          ? "bg-slate-900 text-white ring-slate-900"
+                          : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      {vibe}
+                    </button>
+                  ))}
+                </div>
+
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-500">Gender</label>
-                  <select
-                    value={genderFilter}
-                    onChange={(e) => setGenderFilter(e.target.value as Gender | "All")}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-                  >
-                    <option value="All">Any</option>
-                    {GENDERS.map((gender) => (
-                      <option key={gender} value={gender}>
-                        {gender}
-                      </option>
+                  <div className="flex overflow-hidden rounded-xl ring-1 ring-inset ring-slate-200">
+                    {(["All", ...GENDERS] as const).map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setGenderFilter(option)}
+                        className={`flex-1 py-2 text-xs font-semibold transition ${
+                          genderFilter === option
+                            ? "bg-orange-50 text-orange-700"
+                            : "bg-white text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        {option === "All" ? "Any" : option}
+                      </button>
                     ))}
-                  </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-500">Age</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      inputMode="numeric"
+                      value={ageMinFilter}
+                      onChange={(e) => setAgeMinFilter(e.target.value)}
+                      placeholder="Min"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                    />
+                    <span className="text-xs text-slate-400">to</span>
+                    <input
+                      type="number"
+                      min={0}
+                      inputMode="numeric"
+                      value={ageMaxFilter}
+                      onChange={(e) => setAgeMaxFilter(e.target.value)}
+                      placeholder="Max"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                    />
+                  </div>
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Secondary filters */}
-          <div className="mx-auto max-w-lg px-4 pb-3">
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <button
-                type="button"
-                onClick={() => setVibeFilter("All")}
-                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
-                  vibeFilter === "All"
-                    ? "bg-slate-900 text-white ring-slate-900"
-                    : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                }`}
-              >
-                All styles
-              </button>
-              {TRIP_STYLES.map((vibe) => (
-                <button
-                  key={vibe}
-                  type="button"
-                  onClick={() => setVibeFilter(vibe)}
-                  className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
-                    vibeFilter === vibe
-                      ? "bg-slate-900 text-white ring-slate-900"
-                      : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                  }`}
-                >
-                  {vibe}
-                </button>
-              ))}
-            </div>
           </div>
         </header>
       )}
@@ -1232,7 +1472,36 @@ export default function HomePage() {
       {/* Main content */}
       <main className="mx-auto max-w-lg px-4 py-5 pb-24">
         {!hasSearched ? (
-          <div className="flex min-h-[70vh] flex-col items-center justify-center gap-6 text-center">
+          <div className="relative flex min-h-[70vh] flex-col items-center justify-center gap-6 text-center">
+            <div className="absolute inset-x-0 top-0 flex items-center justify-end gap-2">
+              {currentUser ? (
+                <button
+                  type="button"
+                  onClick={() => router.push("/profile")}
+                  aria-label="My profile"
+                  className="overflow-hidden rounded-full transition active:scale-95"
+                >
+                  <Avatar url={currentUser.avatarUrl} initials={currentUser.avatar} className="h-10 w-10 text-sm" />
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/sign-in")}
+                    className="rounded-full px-3.5 py-2 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-50 active:scale-95"
+                  >
+                    Log in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/sign-up")}
+                    className="rounded-full bg-orange-500 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition active:scale-95 active:bg-orange-600"
+                  >
+                    Sign up
+                  </button>
+                </>
+              )}
+            </div>
             <h1
               style={{ viewTransitionName: "logo" }}
               className="text-5xl font-extrabold tracking-tight text-slate-900"
@@ -1241,7 +1510,9 @@ export default function HomePage() {
             </h1>
 
             <div>
-              <h2 className="text-xl font-bold text-slate-900">Where&apos;s your next trip?</h2>
+              <h2 className="text-xl font-bold text-slate-900">
+                Where&apos;s your next trip{currentUser ? `, ${currentUser.firstName}` : ""}?
+              </h2>
               <p className="mt-1.5 text-sm text-slate-500">Find travelers heading your way.</p>
             </div>
 
@@ -1310,6 +1581,11 @@ export default function HomePage() {
           </div>
         ) : view === "feed" ? (
           <div className="flex flex-col gap-4">
+            <div className="px-1">
+              <h1 className="text-lg font-bold text-slate-900">Trips looking for a travel partner</h1>
+              <p className="text-xs text-slate-500">Browse trips and reach out to plan together.</p>
+            </div>
+
             {filteredPosts.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-sm text-slate-500">
                 No trips match your filters yet.
@@ -1330,24 +1606,56 @@ export default function HomePage() {
                 }}
                 className="relative overflow-hidden rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-200 transition hover:shadow-md active:scale-[0.99]"
               >
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleSavedPost(post.id);
-                  }}
-                  aria-label={savedPostIds.has(post.id) ? "Remove from saved" : "Save trip"}
-                  className={`absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full transition active:scale-90 ${
-                    savedPostIds.has(post.id)
-                      ? "bg-rose-500 text-white"
-                      : "bg-white/90 text-slate-400 ring-1 ring-slate-200 hover:text-rose-500"
-                  }`}
-                >
-                  <IconHeart className="h-4 w-4" filled={savedPostIds.has(post.id)} />
-                </button>
+                <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5">
+                  {currentUser && post.userId === currentUser.id && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startEditPost(post);
+                        }}
+                        aria-label="Edit trip"
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-slate-400 ring-1 ring-slate-200 transition hover:text-slate-700 active:scale-90"
+                      >
+                        <IconEdit className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm("Delete this trip post?")) deletePost(post.id);
+                        }}
+                        aria-label="Delete trip"
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-slate-400 ring-1 ring-slate-200 transition hover:text-rose-600 active:scale-90"
+                      >
+                        <IconTrash className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleSavedPost(post.id);
+                    }}
+                    aria-label={savedPostIds.has(post.id) ? "Remove from saved" : "Save trip"}
+                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-90 ${
+                      savedPostIds.has(post.id)
+                        ? "bg-rose-500 text-white"
+                        : "bg-white/90 text-slate-400 ring-1 ring-slate-200 hover:text-rose-500"
+                    }`}
+                  >
+                    <IconHeart className="h-4 w-4" filled={savedPostIds.has(post.id)} />
+                  </button>
+                </div>
 
                 {/* 1. Destination — primary header */}
-                <div className="flex min-w-0 items-start gap-1.5 pr-9">
+                <div
+                  className={`flex min-w-0 items-start gap-1.5 ${
+                    currentUser && post.userId === currentUser.id ? "pr-28" : "pr-9"
+                  }`}
+                >
                   <IconMapPin className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
                   <h3 className="min-w-0 truncate text-lg font-bold leading-snug text-slate-900">
                     {getDestinationLabel(post.destinations)}
@@ -1362,11 +1670,12 @@ export default function HomePage() {
 
                 {/* 3. User info */}
                 <div className="mt-3 flex items-center gap-2.5">
-                  <div
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${post.user.avatarColor}`}
-                  >
-                    {initials(post.user.name)}
-                  </div>
+                  <Avatar
+                    url={post.user.avatarUrl}
+                    initials={initials(post.user.name)}
+                    colorClass={post.user.avatarColor}
+                    className="h-9 w-9 text-xs"
+                  />
                   <p className="truncate text-sm text-slate-700">
                     <span className="font-semibold text-slate-900">{post.user.name}</span>
                     {" · "}
@@ -1395,6 +1704,11 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="flex flex-col gap-3">
+            <div className="px-1">
+              <h1 className="text-lg font-bold text-slate-900">Where trips are happening</h1>
+              <p className="text-xs text-slate-500">Tap a pin to see who&apos;s heading there.</p>
+            </div>
+
             <div className="relative h-[420px] overflow-hidden rounded-2xl border border-slate-200">
               <TripMap
                 posts={mapMarkers}
@@ -1416,11 +1730,12 @@ export default function HomePage() {
                     }}
                     className="pointer-events-auto flex items-center gap-3 rounded-2xl bg-white p-3 shadow-lg ring-1 ring-slate-200 transition active:scale-[0.99]"
                   >
-                    <div
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${focusedMapPost.user.avatarColor}`}
-                    >
-                      {initials(focusedMapPost.user.name)}
-                    </div>
+                    <Avatar
+                      url={focusedMapPost.user.avatarUrl}
+                      initials={initials(focusedMapPost.user.name)}
+                      colorClass={focusedMapPost.user.avatarColor}
+                      className="h-10 w-10 text-xs"
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-bold text-slate-900">
                         {getDestinationLabel(focusedMapPost.destinations)}
@@ -1662,6 +1977,11 @@ export default function HomePage() {
 
               {/* Step footer */}
               <div className="border-t border-white/10 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+                {postStep === 2 && postError && (
+                  <p className="mb-2 rounded-xl bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300">
+                    {postError}
+                  </p>
+                )}
                 {postStep < 2 ? (
                   <button
                     type="button"
@@ -1674,10 +1994,10 @@ export default function HomePage() {
                 ) : (
                   <button
                     type="submit"
-                    disabled={!isFormValid()}
+                    disabled={!isFormValid() || isSavingPost}
                     className="w-full rounded-2xl bg-orange-500 py-3 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-orange-600 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500"
                   >
-                    Post trip
+                    {isSavingPost ? "Saving…" : editingPostId ? "Save changes" : "Post trip"}
                   </button>
                 )}
               </div>
@@ -1701,6 +2021,28 @@ export default function HomePage() {
                   <IconMap className="h-3.5 w-3.5" />
                   Show Trip Map
                 </button>
+                {currentUser && viewPost.userId === currentUser.id && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => startEditPost(viewPost)}
+                      aria-label="Edit trip"
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:text-slate-900 active:scale-90"
+                    >
+                      <IconEdit className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm("Delete this trip post?")) deletePost(viewPost.id);
+                      }}
+                      aria-label="Delete trip"
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:text-rose-600 active:scale-90"
+                    >
+                      <IconTrash className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => toggleSavedPost(viewPost.id)}
@@ -1729,12 +2071,25 @@ export default function HomePage() {
             </div>
 
             <div className="flex-1 px-5 py-5">
-              {/* Destination */}
+              {/* Destination — wrapped chips rather than one heading, so posts with many
+                  countries/regions read as a scannable list instead of a wall of text. */}
               <div className="flex items-start gap-2">
                 <IconMapPin className="mt-1 h-5 w-5 shrink-0 text-orange-500" />
-                <h1 className="text-2xl font-bold leading-snug text-slate-900">
-                  {getDestinationLabel(viewPost.destinations)}
-                </h1>
+                <div className="flex flex-wrap gap-1.5">
+                  {viewPostDestinationChips?.chips.map((chip, i) => (
+                    <span
+                      key={i}
+                      className="max-w-full truncate rounded-full bg-orange-50 px-3 py-1 text-sm font-bold text-orange-700 ring-1 ring-inset ring-orange-600/20"
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                  {!!viewPostDestinationChips?.moreCount && (
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-500">
+                      +{viewPostDestinationChips.moreCount} more
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Dates */}
@@ -1743,20 +2098,32 @@ export default function HomePage() {
                 {getDateLabel(viewPost.date)}
               </div>
 
+              {viewPost.createdAt && (
+                <p className="mt-1 pl-[26px] text-xs text-slate-400">
+                  Posted {formatRelativeTime(viewPost.createdAt)}
+                </p>
+              )}
+
               {/* User info */}
               <div className="mt-5 flex items-center gap-3 rounded-2xl bg-slate-50 p-3">
-                <div
-                  className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-base font-bold text-white ${viewPost.user.avatarColor}`}
-                >
-                  {initials(viewPost.user.name)}
+                <Avatar
+                  url={viewPost.user.avatarUrl}
+                  initials={initials(viewPost.user.name)}
+                  colorClass={viewPost.user.avatarColor}
+                  className="h-12 w-12 text-base"
+                />
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-700">
+                    <span className="font-semibold text-slate-900">{viewPost.user.name}</span>
+                    {" · "}
+                    {viewPost.user.age}
+                    {" · "}
+                    {formatGender(viewPost.user.gender)}
+                  </p>
+                  {viewPost.user.about && (
+                    <p className="mt-0.5 text-xs italic text-slate-500">&ldquo;{viewPost.user.about}&rdquo;</p>
+                  )}
                 </div>
-                <p className="text-sm text-slate-700">
-                  <span className="font-semibold text-slate-900">{viewPost.user.name}</span>
-                  {" · "}
-                  {viewPost.user.age}
-                  {" · "}
-                  {formatGender(viewPost.user.gender)}
-                </p>
               </div>
 
               {/* Vibe tags */}
@@ -1776,15 +2143,30 @@ export default function HomePage() {
             </div>
 
             <div className="sticky bottom-0 border-t border-slate-100 bg-white p-4">
-              <a
-                href={viewPost.whatsapp}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
-              >
-                <IconWhatsApp className="h-4 w-4" />
-                Message on WhatsApp
-              </a>
+              {revealedContact ? (
+                <a
+                  href={revealedContact}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
+                >
+                  <IconWhatsApp className="h-4 w-4" />
+                  Message on WhatsApp
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() =>
+                    requireAuth(() => {
+                      revealContact(viewPost.id).then((contact) => setRevealedContact(contact));
+                    })
+                  }
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
+                >
+                  <IconWhatsApp className="h-4 w-4" />
+                  {currentUser ? "Show WhatsApp contact" : "Log in to contact"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1795,7 +2177,7 @@ export default function HomePage() {
         <div className="fixed inset-0 z-[1300] flex flex-col bg-white sm:items-center sm:justify-center sm:bg-slate-900/40 sm:p-4">
           <div className="flex h-full w-full max-w-lg flex-col overflow-hidden bg-white sm:h-[80dvh] sm:rounded-3xl sm:shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-              <h2 className="text-sm font-bold text-slate-900">
+              <h2 className="min-w-0 truncate text-sm font-bold text-slate-900">
                 {getDestinationLabel(viewPost.destinations)}
               </h2>
               <button
