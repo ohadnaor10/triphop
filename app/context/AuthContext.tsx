@@ -82,12 +82,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     (async () => {
-      const { error: upsertError } = await supabase.from("profiles").upsert({
-        id: currentUser.id,
-        name: currentUser.name,
-        whatsapp: currentUser.whatsapp,
-        avatar_url: currentUser.avatarUrl,
-        email: currentUser.email,
+      // profiles.whatsapp/email are deliberately unreadable via the client API (see
+      // migration 0006), so a plain .upsert() can't write them — Postgres requires
+      // SELECT on any column an ON CONFLICT DO UPDATE touches. Route through the
+      // sync_profile() RPC instead, which does the write as a SECURITY DEFINER.
+      const { error: upsertError } = await supabase.rpc("sync_profile", {
+        p_id: currentUser.id,
+        p_name: currentUser.name,
+        p_whatsapp: currentUser.whatsapp,
+        p_avatar_url: currentUser.avatarUrl,
+        p_email: currentUser.email,
       });
       if (upsertError) console.error("Failed to sync profile:", upsertError.message);
       if (cancelled) return;
