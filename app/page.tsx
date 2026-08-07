@@ -577,6 +577,13 @@ function HomePageContent() {
     });
   }
 
+  // Stops the click from bubbling into a containing post card/row (which opens the
+  // post-detail view instead) before navigating to that user's profile.
+  function goToUserProfile(userId: string, e?: { stopPropagation: () => void }) {
+    e?.stopPropagation();
+    router.push(`/users/${userId}`);
+  }
+
   function clearMoreFilters() {
     setVibeFilter("All");
     setGenderFilter("All");
@@ -1669,7 +1676,11 @@ function HomePageContent() {
                 </div>
 
                 {/* 3. User info */}
-                <div className="mt-3 flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={(e) => goToUserProfile(post.userId, e)}
+                  className="mt-3 flex items-center gap-2.5 text-left transition active:opacity-70"
+                >
                   <Avatar
                     url={post.user.avatarUrl}
                     initials={initials(post.user.name)}
@@ -1683,7 +1694,7 @@ function HomePageContent() {
                     {" · "}
                     {formatGender(post.user.gender)}
                   </p>
-                </div>
+                </button>
 
                 {/* 4. Style / vibe tags */}
                 <div className="mt-3 flex flex-nowrap gap-1.5 overflow-hidden">
@@ -1730,12 +1741,19 @@ function HomePageContent() {
                     }}
                     className="pointer-events-auto flex items-center gap-3 rounded-2xl bg-white p-3 shadow-lg ring-1 ring-slate-200 transition active:scale-[0.99]"
                   >
-                    <Avatar
-                      url={focusedMapPost.user.avatarUrl}
-                      initials={initials(focusedMapPost.user.name)}
-                      colorClass={focusedMapPost.user.avatarColor}
-                      className="h-10 w-10 text-xs"
-                    />
+                    <button
+                      type="button"
+                      onClick={(e) => goToUserProfile(focusedMapPost.userId, e)}
+                      aria-label={`View ${focusedMapPost.user.name}'s profile`}
+                      className="shrink-0 rounded-full transition active:scale-95"
+                    >
+                      <Avatar
+                        url={focusedMapPost.user.avatarUrl}
+                        initials={initials(focusedMapPost.user.name)}
+                        colorClass={focusedMapPost.user.avatarColor}
+                        className="h-10 w-10 text-xs"
+                      />
+                    </button>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-bold text-slate-900">
                         {getDestinationLabel(focusedMapPost.destinations)}
@@ -2105,7 +2123,11 @@ function HomePageContent() {
               )}
 
               {/* User info */}
-              <div className="mt-5 flex items-center gap-3 rounded-2xl bg-slate-50 p-3">
+              <button
+                type="button"
+                onClick={() => goToUserProfile(viewPost.userId)}
+                className="mt-5 flex w-full items-center gap-3 rounded-2xl bg-slate-50 p-3 text-left transition hover:bg-slate-100 active:scale-[0.99]"
+              >
                 <Avatar
                   url={viewPost.user.avatarUrl}
                   initials={initials(viewPost.user.name)}
@@ -2124,7 +2146,7 @@ function HomePageContent() {
                     <p className="mt-0.5 text-xs italic text-slate-500">&ldquo;{viewPost.user.about}&rdquo;</p>
                   )}
                 </div>
-              </div>
+              </button>
 
               {/* Vibe tags */}
               <div className="mt-4 flex flex-wrap gap-1.5">

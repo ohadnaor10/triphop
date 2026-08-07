@@ -186,3 +186,17 @@ export function IconLogOut(props: { className?: string }) {
     </svg>
   );
 }
+
+export function IconMessageCircle(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={props.className}>
+      <path
+        d="M21 11.5a8.38 8.38 0 0 1-4.4 7.4 8.5 8.5 0 0 1-9.1-.4L3 20l1.5-4.5a8.38 8.38 0 0 1-.4-2.9A8.5 8.5 0 0 1 12.5 3.5 8.5 8.5 0 0 1 21 11.5z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
