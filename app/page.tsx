@@ -14,6 +14,7 @@ import {
   IconLogOut,
   IconMap,
   IconMapPin,
+  IconMessageCircle,
   IconPlus,
   IconSearch,
   IconSliders,
@@ -48,6 +49,7 @@ import {
 import { hasActiveDateSearch, rankByRelevance, type DateSearchInput } from "./lib/relevance";
 import { useAuth } from "./context/AuthContext";
 import { usePostsStore } from "./lib/postsStore";
+import { useClerkSupabaseClient } from "./lib/supabase/useClerkSupabaseClient";
 
 const TripMap = dynamic(() => import("./components/TripMap"), {
   ssr: false,
@@ -499,6 +501,7 @@ function HomePageContent() {
   const { currentUser, logout, requireAuth } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const supabase = useClerkSupabaseClient();
   const { posts, savedPostIds, addPost, editPost, removePost, toggleSaved, revealContact } = usePostsStore();
   const [revealedContact, setRevealedContact] = useState<string | null>(null);
   const [view, setView] = useState<"feed" | "map">("feed");
@@ -518,6 +521,11 @@ function HomePageContent() {
   const [postStep, setPostStep] = useState<0 | 1 | 2>(0);
   const [postDestQuery, setPostDestQuery] = useState("");
   const [viewPostId, setViewPostId] = useState<string | null>(null);
+  // A user profile is an overlay on top of whatever's already showing (feed, map, or
+  // even an open post-detail view) rather than a route change — routing away and back
+  // would unmount this whole component and lose hasSearched/filters/scroll, exactly the
+  // thing "back" should never do. See the profile overlay near the other modals below.
+  const [viewUserId, setViewUserId] = useState<string | null>(null);
   const [isTripMapOpen, setIsTripMapOpen] = useState(false);
   const [tripMapPoints, setTripMapPoints] = useState<GeoPoint[]>([]);
   const [showSavedOnly, setShowSavedOnly] = useState(false);
@@ -547,9 +555,19 @@ function HomePageContent() {
     setViewPostId(postParam);
   }
 
+  // Same pattern for /?user=<id> — the old standalone /users/[id] route redirects here
+  // so a shared/bookmarked profile link still opens the right overlay.
+  const userParam = searchParams.get("user");
+  const [handledUserParam, setHandledUserParam] = useState<string | null>(null);
+  if (userParam && userParam !== handledUserParam) {
+    setHandledUserParam(userParam);
+    setHasSearched(true);
+    setViewUserId(userParam);
+  }
+
   useEffect(() => {
-    if (handledPostParam) router.replace("/");
-  }, [handledPostParam, router]);
+    if (handledPostParam || handledUserParam) router.replace("/");
+  }, [handledPostParam, handledUserParam, router]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -578,11 +596,66 @@ function HomePageContent() {
   }
 
   // Stops the click from bubbling into a containing post card/row (which opens the
-  // post-detail view instead) before navigating to that user's profile.
+  // post-detail view instead) before opening that user's profile overlay.
   function goToUserProfile(userId: string, e?: { stopPropagation: () => void }) {
     e?.stopPropagation();
-    router.push(`/users/${userId}`);
+    setViewUserId(userId);
   }
+
+  type ViewedProfile = {
+    name: string;
+    age: number | null;
+    gender: Gender | null;
+    avatarColor: string | null;
+    avatarUrl: string | null;
+    about: string | null;
+  };
+  const [viewedProfile, setViewedProfile] = useState<ViewedProfile | null>(null);
+  const [viewedProfileLoading, setViewedProfileLoading] = useState(false);
+
+  // Reset synchronously on render when the viewed user changes, rather than in an
+  // effect (https://react.dev/learn/you-might-not-need-an-effect) — same pattern as
+  // revealedForPostId below.
+  const [profileFetchedForUserId, setProfileFetchedForUserId] = useState<string | null>(null);
+  if (viewUserId !== profileFetchedForUserId) {
+    setProfileFetchedForUserId(viewUserId);
+    setViewedProfile(null);
+    setViewedProfileLoading(viewUserId !== null);
+  }
+
+  useEffect(() => {
+    if (!viewUserId) return;
+    let cancelled = false;
+    supabase
+      .from("profiles")
+      .select("name, age, gender, avatar_color, avatar_url, about")
+      .eq("id", viewUserId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        setViewedProfile(
+          error || !data
+            ? null
+            : {
+                name: data.name,
+                age: data.age,
+                gender: data.gender,
+                avatarColor: data.avatar_color,
+                avatarUrl: data.avatar_url,
+                about: data.about,
+              },
+        );
+        setViewedProfileLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewUserId, supabase]);
+
+  const viewedUserPosts = useMemo(
+    () => (viewUserId ? posts.filter((p) => p.userId === viewUserId) : []),
+    [posts, viewUserId],
+  );
 
   function clearMoreFilters() {
     setVibeFilter("All");
@@ -2188,6 +2261,105 @@ function HomePageContent() {
                   <IconWhatsApp className="h-4 w-4" />
                   {currentUser ? "Show WhatsApp contact" : "Log in to contact"}
                 </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User Profile overlay — sits above the Post Detail View (z-[1200]) so opening a
+          profile from within a post's user-info block layers on top rather than
+          replacing it; closing this reveals whatever was open underneath untouched. */}
+      {viewUserId && (
+        <div className="fixed inset-0 z-[1250] flex justify-center bg-white sm:items-center sm:bg-slate-900/40 sm:p-4">
+          <div className="flex h-full w-full max-w-lg flex-col overflow-y-auto bg-white sm:h-auto sm:max-h-[90dvh] sm:rounded-3xl sm:shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-slate-100 bg-white/90 px-4 py-3 backdrop-blur-md">
+              <button
+                type="button"
+                onClick={() => setViewUserId(null)}
+                aria-label="Back"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition active:scale-95 active:bg-slate-200"
+              >
+                <IconChevronLeft className="h-4 w-4" />
+              </button>
+              <h2 className="text-sm font-bold text-slate-900">Profile</h2>
+            </div>
+
+            <div className="flex-1 px-5 py-5">
+              {viewedProfileLoading ? (
+                <p className="text-sm text-slate-400">Loading…</p>
+              ) : !viewedProfile ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-sm text-slate-500">
+                  This traveler couldn&apos;t be found.
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-col items-center gap-3 text-center">
+                    <Avatar
+                      url={viewedProfile.avatarUrl}
+                      initials={initials(viewedProfile.name)}
+                      colorClass={viewedProfile.avatarColor ?? undefined}
+                      className="h-20 w-20 text-2xl"
+                    />
+                    <div>
+                      <p className="text-lg font-bold text-slate-900">{viewedProfile.name}</p>
+                      {(viewedProfile.age !== null || viewedProfile.gender) && (
+                        <p className="text-sm text-slate-500">
+                          {[viewedProfile.age, viewedProfile.gender ? formatGender(viewedProfile.gender) : null]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                      )}
+                    </div>
+                    {viewedProfile.about && (
+                      <p className="text-sm italic leading-relaxed text-slate-600">&ldquo;{viewedProfile.about}&rdquo;</p>
+                    )}
+                    <button
+                      type="button"
+                      disabled
+                      title="Chat is coming soon"
+                      className="mt-1 flex cursor-not-allowed items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-400"
+                    >
+                      <IconMessageCircle className="h-4 w-4" />
+                      Message (coming soon)
+                    </button>
+                  </div>
+
+                  <div className="mt-6">
+                    <h3 className="px-1 text-sm font-bold text-slate-900">
+                      {viewedProfile.name.split(" ")[0]}&apos;s posts
+                    </h3>
+                    <div className="mt-2 flex flex-col gap-3">
+                      {viewedUserPosts.length === 0 && (
+                        <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500">
+                          No trips posted yet.
+                        </div>
+                      )}
+                      {viewedUserPosts.map((post) => (
+                        <button
+                          key={post.id}
+                          type="button"
+                          onClick={() => {
+                            setViewUserId(null);
+                            setViewPostId(post.id);
+                          }}
+                          className="rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-200 transition hover:shadow-md active:scale-[0.99]"
+                        >
+                          <div className="flex min-w-0 items-start gap-1.5">
+                            <IconMapPin className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
+                            <h4 className="min-w-0 truncate text-sm font-bold text-slate-900">
+                              {getDestinationLabel(post.destinations)}
+                            </h4>
+                          </div>
+                          <div className="mt-1 flex items-center gap-1.5 pl-[22px] text-xs text-slate-500">
+                            <IconCalendar className="h-3.5 w-3.5 shrink-0" />
+                            {getDateLabel(post.date, true)}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           </div>
