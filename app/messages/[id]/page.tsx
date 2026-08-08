@@ -28,7 +28,7 @@ function formatMessageTime(iso: string): string {
 export default function MessageThreadPage() {
   const { id: counterpartId } = useParams<{ id: string }>();
   const router = useRouter();
-  const { currentUser } = useAuth();
+  const { currentUser, isAuthLoaded } = useAuth();
   const supabase = useClerkSupabaseClient();
   const { messages, loading, sendMessage } = useThread(counterpartId ?? null);
 
@@ -40,8 +40,10 @@ export default function MessageThreadPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!currentUser) router.replace("/sign-in");
-  }, [currentUser, router]);
+    // Wait for Clerk to finish checking the session — otherwise an actually-signed-in
+    // user gets bounced to /sign-in during the brief window before it's loaded.
+    if (isAuthLoaded && !currentUser) router.replace("/sign-in");
+  }, [isAuthLoaded, currentUser, router]);
 
   useEffect(() => {
     if (!counterpartId) return;

@@ -74,7 +74,7 @@ const COMING_SOON_CARDS = [
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { currentUser } = useAuth();
+  const { currentUser, isAuthLoaded } = useAuth();
   const { openUserProfile } = useClerk();
   const supabase = useClerkSupabaseClient();
   const { posts, removePost } = usePostsStore();
@@ -89,6 +89,10 @@ export default function ProfilePage() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
+    // Clerk hasn't finished checking the session yet — currentUser reads null either
+    // way, but redirecting now would bounce an actually-signed-in user to /sign-in
+    // during this brief window on every fresh page load.
+    if (!isAuthLoaded) return;
     if (!currentUser) {
       router.replace("/sign-in");
       return;
@@ -112,7 +116,7 @@ export default function ProfilePage() {
     return () => {
       cancelled = true;
     };
-  }, [currentUser, supabase, router]);
+  }, [isAuthLoaded, currentUser, supabase, router]);
 
   if (!currentUser) return null;
 

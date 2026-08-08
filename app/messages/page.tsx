@@ -36,14 +36,16 @@ function formatConversationTime(iso: string): string {
 
 export default function MessagesInboxPage() {
   const router = useRouter();
-  const { currentUser } = useAuth();
+  const { currentUser, isAuthLoaded } = useAuth();
   const supabase = useClerkSupabaseClient();
   const { conversations, loading } = useConversations();
   const [profiles, setProfiles] = useState<Record<string, CounterpartProfile>>({});
 
   useEffect(() => {
-    if (!currentUser) router.replace("/sign-in");
-  }, [currentUser, router]);
+    // Wait for Clerk to finish checking the session — otherwise an actually-signed-in
+    // user gets bounced to /sign-in during the brief window before it's loaded.
+    if (isAuthLoaded && !currentUser) router.replace("/sign-in");
+  }, [isAuthLoaded, currentUser, router]);
 
   useEffect(() => {
     const ids = conversations.map((c) => c.counterpartId);

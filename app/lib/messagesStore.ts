@@ -41,6 +41,16 @@ function rowToMessage(row: MessageRow): Message {
   };
 }
 
+// Polling intervals, not Supabase Realtime websockets: Realtime's authorization for
+// RLS-protected tables (like messages) doesn't reliably carry Clerk's third-party JWT
+// the way it does Supabase's own auth — messages were only ever showing up after a
+// full reload, i.e. the subscription was silently never actually live. Polling only
+// depends on the same REST path already proven to work for every other query in this
+// app, at the cost of a few seconds' latency instead of instant delivery.
+const THREAD_POLL_MS = 3000;
+const INBOX_POLL_MS = 5000;
+const UNREAD_BADGE_POLL_MS = 10000;
+
 // Lists every conversation the signed-in user is in, newest first, with an unread
 // count per counterpart — backed by the my_conversations/my_unread_counts views
 // (see migration 0011), which enforce the same "participants only" RLS as the
@@ -93,33 +103,17 @@ export function useConversations() {
     setLoading(false);
   }, [currentUser, supabase]);
 
-  // Loads the list once subscribed, then keeps it live — any message where I'm sender
-  // or recipient (a new thread, a new latest message, a read receipt) triggers a
-  // refetch rather than a hand-patched update. The initial load rides on the
-  // subscription callback rather than a bare refresh() call in the effect body, since
-  // that's the one shape this codebase's setState-in-effect lint rule doesn't flag —
-  // same reasoning as the "call setState in a callback" cases scattered through page.tsx.
   useEffect(() => {
     if (!currentUser) return;
-    const channel = supabase
-      .channel(`inbox:${currentUser.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "messages", filter: `recipient_id=eq.${currentUser.id}` },
-        refresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "messages", filter: `sender_id=eq.${currentUser.id}` },
-        refresh,
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") refresh();
-      });
+    // Deferred via setTimeout/setInterval callbacks rather than a bare refresh() call
+    // in the effect body, per this codebase's setState-in-effect lint rule.
+    const kick = setTimeout(refresh, 0);
+    const timer = setInterval(refresh, INBOX_POLL_MS);
     return () => {
-      supabase.removeChannel(channel);
+      clearTimeout(kick);
+      clearInterval(timer);
     };
-  }, [currentUser, supabase, refresh]);
+  }, [currentUser, refresh]);
 
   const totalUnread = conversations.reduce((sum, c) => sum + c.unreadCount, 0);
 
@@ -127,7 +121,7 @@ export function useConversations() {
 }
 
 // A cheap, header-badge-only version of the above — just the total unread count, via
-// the get_unread_message_count() RPC, kept live over realtime.
+// the get_unread_message_count() RPC.
 export function useUnreadMessageCount() {
   const { currentUser } = useAuth();
   const supabase = useClerkSupabaseClient();
@@ -148,26 +142,19 @@ export function useUnreadMessageCount() {
 
   useEffect(() => {
     if (!currentUser) return;
-    const channel = supabase
-      .channel(`unread:${currentUser.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "messages", filter: `recipient_id=eq.${currentUser.id}` },
-        refresh,
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") refresh();
-      });
+    const kick = setTimeout(refresh, 0);
+    const timer = setInterval(refresh, UNREAD_BADGE_POLL_MS);
     return () => {
-      supabase.removeChannel(channel);
+      clearTimeout(kick);
+      clearInterval(timer);
     };
-  }, [currentUser, supabase, refresh]);
+  }, [currentUser, refresh]);
 
   return count;
 }
 
 // The full back-and-forth with one specific counterpart, marking their messages read
-// as soon as the thread is opened and staying live over realtime while it's open.
+// as soon as the thread is opened and polling for new ones while it stays open.
 export function useThread(counterpartId: string | null) {
   const { currentUser } = useAuth();
   const supabase = useClerkSupabaseClient();
@@ -182,32 +169,36 @@ export function useThread(counterpartId: string | null) {
     setLoading(counterpartId !== null);
   }
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!currentUser || !counterpartId) return;
-    let cancelled = false;
-    supabase
+    const { data, error } = await supabase
       .from("messages")
       .select("id, sender_id, recipient_id, body, created_at, read_at")
       .or(
         `and(sender_id.eq.${currentUser.id},recipient_id.eq.${counterpartId}),and(sender_id.eq.${counterpartId},recipient_id.eq.${currentUser.id})`,
       )
-      .order("created_at", { ascending: true })
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
-          console.error("Failed to load messages:", error.message);
-        } else {
-          setMessages((data as MessageRow[] | null ?? []).map(rowToMessage));
-        }
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error("Failed to load messages:", error.message);
+      setLoading(false);
+      return;
+    }
+    setMessages((data as MessageRow[] | null ?? []).map(rowToMessage));
+    setLoading(false);
   }, [currentUser, counterpartId, supabase]);
 
-  // Mark the counterpart's messages read once the thread is open — mirrors clicking
-  // into a chat in any messaging app.
+  useEffect(() => {
+    if (!currentUser || !counterpartId) return;
+    const kick = setTimeout(load, 0);
+    const timer = setInterval(load, THREAD_POLL_MS);
+    return () => {
+      clearTimeout(kick);
+      clearInterval(timer);
+    };
+  }, [currentUser, counterpartId, load]);
+
+  // Mark the counterpart's messages read once the thread is open (and again each time
+  // polling turns up new ones) — mirrors clicking into a chat in any messaging app.
   useEffect(() => {
     if (!currentUser || !counterpartId) return;
     supabase
@@ -221,26 +212,6 @@ export function useThread(counterpartId: string | null) {
       });
   }, [currentUser, counterpartId, supabase, messages.length]);
 
-  // Live-append anything the counterpart sends while this thread is open.
-  useEffect(() => {
-    if (!currentUser || !counterpartId) return;
-    const channel = supabase
-      .channel(`thread:${[currentUser.id, counterpartId].sort().join(":")}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages", filter: `sender_id=eq.${counterpartId}` },
-        (payload) => {
-          const row = payload.new as MessageRow;
-          if (row.recipient_id !== currentUser.id) return;
-          setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, rowToMessage(row)]));
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [currentUser, counterpartId, supabase]);
-
   const sendMessage = useCallback(
     async (body: string) => {
       if (!currentUser || !counterpartId) return "Not signed in";
@@ -252,7 +223,7 @@ export function useThread(counterpartId: string | null) {
         .select("id, sender_id, recipient_id, body, created_at, read_at")
         .single();
       if (error || !data) return error?.message ?? "Failed to send message";
-      setMessages((prev) => [...prev, rowToMessage(data as MessageRow)]);
+      setMessages((prev) => (prev.some((m) => m.id === (data as MessageRow).id) ? prev : [...prev, rowToMessage(data as MessageRow)]));
       return null;
     },
     [currentUser, counterpartId, supabase],

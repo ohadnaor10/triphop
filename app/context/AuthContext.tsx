@@ -28,6 +28,14 @@ function initialsOf(name: string): string {
 
 type AuthContextValue = {
   currentUser: AuthUser | null;
+  /**
+   * False until Clerk has finished checking whether there's a signed-in session.
+   * currentUser is null both while this is false *and* once it's true with no
+   * session — pages that redirect on `!currentUser` must wait for this first, or a
+   * signed-in user gets bounced to /sign-in during that brief initial window on every
+   * fresh page load (Clerk hasn't hydrated yet, so isSignedIn briefly reads false).
+   */
+  isAuthLoaded: boolean;
   logout: () => void;
   /** Runs `action` if logged in; otherwise sends the user to /sign-in. */
   requireAuth: (action: () => void) => void;
@@ -42,7 +50,7 @@ export function useAuth(): AuthContextValue {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { isSignedIn, user } = useUser();
+  const { isLoaded: isAuthLoaded, isSignedIn, user } = useUser();
   const { signOut } = useClerk();
   const router = useRouter();
   const pathname = usePathname();
@@ -135,5 +143,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signOut();
   }, [signOut]);
 
-  return <AuthContext.Provider value={{ currentUser, logout, requireAuth }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ currentUser, isAuthLoaded: isAuthLoaded ?? false, logout, requireAuth }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
