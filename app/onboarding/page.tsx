@@ -26,6 +26,7 @@ export default function OnboardingPage() {
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState<Gender | "">("");
   const [about, setAbout] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -44,11 +45,22 @@ export default function OnboardingPage() {
       gender,
       about: about.trim() || null,
     });
-    setIsSaving(false);
     if (error) {
+      setIsSaving(false);
       setError(error.message);
       return;
     }
+    // whatsapp isn't select-granted (see migration 0001), so it goes through the
+    // update_whatsapp() RPC rather than this upsert — same reason as sync_profile.
+    if (whatsapp.trim() !== "") {
+      const { error: whatsappError } = await supabase.rpc("update_whatsapp", { p_whatsapp: whatsapp.trim() });
+      if (whatsappError) {
+        setIsSaving(false);
+        setError(whatsappError.message);
+        return;
+      }
+    }
+    setIsSaving(false);
     router.replace("/");
   }
 
@@ -123,6 +135,21 @@ export default function OnboardingPage() {
               rows={3}
               className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
             />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">WhatsApp number (optional)</label>
+            <input
+              type="tel"
+              value={whatsapp}
+              onChange={(e) => setWhatsapp(e.target.value)}
+              placeholder="e.g. +1 555 000 1111"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              Only shown on a post if you choose to share it there. You can add or change this later in account
+              settings.
+            </p>
           </div>
 
           {error && <p className="text-xs text-rose-600">{error}</p>}

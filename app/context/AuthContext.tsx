@@ -14,7 +14,6 @@ export type AuthUser = {
   firstName: string;
   avatar: string;
   avatarUrl: string | null;
-  whatsapp: string;
   email: string;
 };
 
@@ -60,7 +59,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // hasImage is false for Clerk's default placeholder — only treat a genuinely
       // uploaded photo as an avatar, so everywhere else can fall back to initials.
       avatarUrl: user.hasImage ? user.imageUrl : null,
-      whatsapp: user.primaryPhoneNumber?.phoneNumber ?? "",
       email: user.primaryEmailAddress?.emailAddress ?? "",
     };
   }, [isSignedIn, user]);
@@ -82,14 +80,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     (async () => {
-      // profiles.whatsapp/email are deliberately unreadable via the client API (see
-      // migration 0006), so a plain .upsert() can't write them — Postgres requires
-      // SELECT on any column an ON CONFLICT DO UPDATE touches. Route through the
-      // sync_profile() RPC instead, which does the write as a SECURITY DEFINER.
+      // profiles.email is deliberately unreadable via the client API (see migration
+      // 0006), so a plain .upsert() can't write it — Postgres requires SELECT on any
+      // column an ON CONFLICT DO UPDATE touches. Route through the sync_profile() RPC
+      // instead, which does the write as a SECURITY DEFINER. whatsapp is excluded here
+      // on purpose — unlike name/avatar/email, it isn't Clerk-owned data to mirror; the
+      // user sets it explicitly (onboarding / account settings, see update_whatsapp()),
+      // and re-syncing it here on every sign-in would clobber that back to nothing.
       const { error: upsertError } = await supabase.rpc("sync_profile", {
         p_id: currentUser.id,
         p_name: currentUser.name,
-        p_whatsapp: currentUser.whatsapp,
         p_avatar_url: currentUser.avatarUrl,
         p_email: currentUser.email,
       });

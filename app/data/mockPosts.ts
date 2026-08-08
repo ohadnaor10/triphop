@@ -17,6 +17,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Backpacking", "Adventure"],
     bio: "Chasing glaciers and quiet trails. Looking for one or two people to split a rental car and hike the W trek. Early riser, flexible itinerary.",
     whatsapp: "https://wa.me/10000000001",
+    shareContact: true,
   },
   {
     id: "2",
@@ -27,6 +28,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Road Trip", "Chill"],
     bio: "Slow road trip along the coast, good food, better wine. Dates are flexible within this window — happy to shift to match a good travel partner.",
     whatsapp: "https://wa.me/10000000002",
+    shareContact: true,
   },
   {
     id: "3",
@@ -37,6 +39,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Culture", "Chill"],
     bio: "First time in Japan, want to take it slow — temples, tea houses, and a lot of photography. Happy to plan together beforehand.",
     whatsapp: "https://wa.me/10000000003",
+    shareContact: true,
   },
   {
     id: "4",
@@ -47,6 +50,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Luxury", "Adventure"],
     bio: "Open on the exact country — thinking Cape Town, Marrakech, or Dubai. Splitting a nice place and a couple of guided tours with the right partner.",
     whatsapp: "https://wa.me/10000000004",
+    shareContact: true,
   },
   {
     id: "5",
@@ -57,6 +61,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Chill", "Adventure"],
     bio: "Chasing the Northern Lights and hunting for the mythical hot dog stand that's apparently 'world famous'. Bring thermals, low expectations of sunlight, and a high tolerance for puffin merchandise.",
     whatsapp: "https://wa.me/10000000005",
+    shareContact: true,
   },
   {
     id: "6",
@@ -67,6 +72,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Adventure", "Chill"],
     bio: "Fjords so dramatic they should have their own reality show. Looking for a partner who won't complain when I stop every 200 meters to photograph a sheep on a cliff.",
     whatsapp: "https://wa.me/10000000006",
+    shareContact: true,
   },
   {
     id: "7",
@@ -77,6 +83,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Adventure", "Backpacking"],
     bio: "Will jump off a bridge attached to a rubber band for content. Certified hobbit-hole enthusiast. Looking for someone who screams at the appropriate volume on a bungee.",
     whatsapp: "https://wa.me/10000000007",
+    shareContact: true,
   },
   {
     id: "8",
@@ -87,6 +94,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Chill", "Backpacking"],
     bio: "Pura vida energy only. My spirit animal is a sloth and I intend to match its pace exactly. Looking for someone who understands that 'hurry' is not in the itinerary.",
     whatsapp: "https://wa.me/10000000008",
+    shareContact: true,
   },
   {
     id: "9",
@@ -105,6 +113,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Backpacking", "Culture"],
     bio: "Extremely flexible human being with an extremely inflexible love of banh mi. Will reroute the entire trip for a good bowl of pho. Motorbike rental optional, motion sickness pills mandatory.",
     whatsapp: "https://wa.me/10000000009",
+    shareContact: true,
   },
   {
     id: "10",
@@ -115,6 +124,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Luxury", "Chill"],
     bio: "Here for the sunsets, the feta, and absolutely nothing that requires waking up before 10am. Bring sunglasses big enough to hide the fact that I have no plan beyond 'more olives.'",
     whatsapp: "https://wa.me/10000000010",
+    shareContact: true,
   },
   {
     id: "11",
@@ -125,6 +135,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Adventure", "Backpacking"],
     bio: "Looking for a trekking partner who won't cry (much) at altitude. I will absolutely befriend every yak we pass and give them names. Snacks are non-negotiable.",
     whatsapp: "https://wa.me/10000000011",
+    shareContact: true,
   },
   {
     id: "12",
@@ -135,6 +146,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Chill", "Culture"],
     bio: "Game of Thrones cosplay strongly encouraged but not required. Mostly here to swim, eat too much seafood, and pretend I understand the walls' historical significance.",
     whatsapp: "https://wa.me/10000000012",
+    shareContact: true,
   },
   {
     id: "13",
@@ -145,6 +157,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Culture", "Chill"],
     bio: "Will plan the entire trip around convenience store snacks and one (1) K-drama filming location. Karaoke stamina required, singing talent not required at all.",
     whatsapp: "https://wa.me/10000000013",
+    shareContact: true,
   },
   {
     id: "14",
@@ -155,6 +168,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Road Trip", "Chill"],
     bio: "Renting a car and driving on the correct side of the road (theirs, not mine). Itinerary is 70% pubs, 20% castles, 10% apologizing to sheep for blocking the road.",
     whatsapp: "https://wa.me/10000000014",
+    shareContact: true,
   },
   {
     id: "15",
@@ -170,6 +184,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Adventure", "Chill"],
     bio: "Seeking a fellow cryptid enthusiast for a very serious, very scientific Loch Ness monster stakeout. Waterproof everything. Bagpipe tolerance a plus but not essential.",
     whatsapp: "https://wa.me/10000000015",
+    shareContact: true,
   },
   {
     id: "16",
@@ -180,6 +195,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Backpacking", "Adventure", "Culture"],
     bio: "Training regimen for the Inca Trail: climbing exactly zero stairs beforehand and hoping for the best. Alpaca photography is mandatory, altitude complaints are welcome but ignored.",
     whatsapp: "https://wa.me/10000000016",
+    shareContact: true,
   },
   {
     id: "17",
@@ -190,6 +206,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Chill", "Backpacking"],
     bio: "Island hopping until my phone runs out of storage from lagoon photos that all look identical. Will trade coconut-carrying duties for someone else's sunscreen.",
     whatsapp: "https://wa.me/10000000017",
+    shareContact: true,
   },
   {
     id: "18",
@@ -200,6 +217,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Culture", "Road Trip"],
     bio: "Salsa lessons booked, two left feet not disclosed to the instructor. Here for the coffee, the color, and confusing every street vendor with my questionable Spanish.",
     whatsapp: "https://wa.me/10000000018",
+    shareContact: true,
   },
   {
     id: "19",
@@ -210,6 +228,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Luxury", "Culture"],
     bio: "Playing passport roulette — could end up in a rooftop bar in Athens or a souk in Dubai, honestly thrilled either way. Looking for someone equally unbothered by uncertainty and overpacking.",
     whatsapp: "https://wa.me/10000000019",
+    shareContact: true,
   },
   {
     id: "20",
@@ -223,6 +242,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Adventure", "Road Trip"],
     bio: "Alpine loop through the French and Swiss Alps — glacier hikes by day, fondue by night. Looking for a co-driver who's fine with switchbacks and cable cars.",
     whatsapp: "https://wa.me/10000000020",
+    shareContact: true,
   },
   {
     id: "21",
@@ -233,6 +253,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Culture", "Backpacking"],
     bio: "Rajasthan's forts, markets, and street food circuit. Camera-heavy, haggling-friendly, always down for one more chai stop.",
     whatsapp: "https://wa.me/10000000021",
+    shareContact: true,
   },
   {
     id: "22",
@@ -243,6 +264,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Backpacking", "Adventure"],
     bio: "Open-ended South America loop — Patagonia glaciers to Andean altiplano, exact route negotiable. Traveling light, moving slow, saying yes to detours.",
     whatsapp: "https://wa.me/10000000022",
+    shareContact: true,
   },
   {
     id: "23",
@@ -253,6 +275,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Chill", "Culture"],
     bio: "Temple mornings, night market dinners, a few slow beach days at the end. Vegetarian-friendly itinerary a plus.",
     whatsapp: "https://wa.me/10000000023",
+    shareContact: true,
   },
   {
     id: "24",
@@ -263,6 +286,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Road Trip", "Culture"],
     bio: "Slow motorhome loop through the Alps region — no fixed route, just good roads, mountain villages, and cheese. Flexible on exact countries.",
     whatsapp: "https://wa.me/10000000024",
+    shareContact: true,
   },
   {
     id: "25",
@@ -273,6 +297,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Backpacking", "Adventure"],
     bio: "East coast hostel-hopping, surf lessons, and the Great Barrier Reef before it's gone. Working holiday visa in hand, budget tight, energy high.",
     whatsapp: "https://wa.me/10000000025",
+    shareContact: true,
   },
   {
     id: "26",
@@ -283,6 +308,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Culture", "Adventure"],
     bio: "Medinas, blue streets, and a night camping under the stars in the Sahara. Looking for someone who can haggle better than me.",
     whatsapp: "https://wa.me/10000000026",
+    shareContact: true,
   },
   {
     id: "27",
@@ -293,6 +319,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Culture", "Chill"],
     bio: "Mezcal tastings in Oaxaca, murals and markets in CDMX, cenote days in Tulum. Foodie itinerary, open to reshuffling stops.",
     whatsapp: "https://wa.me/10000000027",
+    shareContact: true,
   },
   {
     id: "28",
@@ -303,6 +330,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Adventure", "Road Trip"],
     bio: "Rockies road trip — turquoise lakes, hiking boots on daily, tent most nights. Bear spray provided, snoring not guaranteed to be minimal.",
     whatsapp: "https://wa.me/10000000028",
+    shareContact: true,
   },
   {
     id: "29",
@@ -313,6 +341,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Chill", "Adventure"],
     bio: "Beach days, samba nights, and a boat trip out to Ilha Grande. Carnival-adjacent timing, up for spontaneity.",
     whatsapp: "https://wa.me/10000000029",
+    shareContact: true,
   },
   {
     id: "30",
@@ -323,6 +352,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Adventure", "Luxury"],
     bio: "Safari-focused, exact country still open — leaning Kenya or Tanzania depending on migration timing. Splitting a guide and a good camera lens.",
     whatsapp: "https://wa.me/10000000030",
+    shareContact: true,
   },
   {
     id: "31",
@@ -336,6 +366,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Culture", "Chill"],
     bio: "Classic Italy hits, then a quiet detour into Slovenia before flying home. Museums in the morning, wine in the afternoon.",
     whatsapp: "https://wa.me/10000000031",
+    shareContact: true,
   },
   {
     id: "32",
@@ -346,6 +377,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Chill", "Backpacking"],
     bio: "Month in Bali — yoga in the mornings, scooter days exploring Nusa Penida, digital nomad cafes in between. Looking for a low-drama roommate/travel partner.",
     whatsapp: "https://wa.me/10000000032",
+    shareContact: true,
   },
   {
     id: "33",
@@ -356,6 +388,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Culture", "Chill"],
     bio: "Christmas markets, mulled wine, and a couple of museum days. Timing flexible around the holidays — happy to sync with a partner's schedule.",
     whatsapp: "https://wa.me/10000000033",
+    shareContact: true,
   },
   {
     id: "34",
@@ -366,6 +399,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Luxury", "Adventure"],
     bio: "Table Mountain, whale watching in Hermanus, and way too many wine farm stops in between. Rental car and good playlist required.",
     whatsapp: "https://wa.me/10000000034",
+    shareContact: true,
   },
   {
     id: "35",
@@ -376,6 +410,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Culture", "Adventure"],
     bio: "Hot air balloons at sunrise in Cappadocia, bazaars in Istanbul, coastline in Antalya to close it out. Open to reordering the route.",
     whatsapp: "https://wa.me/10000000035",
+    shareContact: true,
   },
   {
     id: "36",
@@ -386,6 +421,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Backpacking", "Culture"],
     bio: "First big SE Asia loop, exact countries TBD based on visas and weather — thinking Vietnam, Laos, Cambodia. Slow travel, overland where possible.",
     whatsapp: "https://wa.me/10000000036",
+    shareContact: true,
   },
   {
     id: "37",
@@ -396,6 +432,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Adventure", "Backpacking"],
     bio: "W trek in Torres del Paine, then a few easy days in Santiago wine country to recover. Camping gear split three ways if we can find a third.",
     whatsapp: "https://wa.me/10000000037",
+    shareContact: true,
   },
   {
     id: "38",
@@ -409,6 +446,7 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Culture", "Road Trip"],
     bio: "Andalusia road trip that ends with a ferry hop across the strait into Tangier for a few days. Tapas budget non-negotiable.",
     whatsapp: "https://wa.me/10000000038",
+    shareContact: true,
   },
   {
     id: "39",
@@ -419,5 +457,6 @@ export const INITIAL_POSTS: Post[] = [
     vibes: ["Road Trip", "Adventure"],
     bio: "Big fall national parks road trip — exact states still open, chasing good foliage and open campsites. Van life or bust.",
     whatsapp: "https://wa.me/10000000039",
+    shareContact: true,
   },
 ];

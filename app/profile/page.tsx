@@ -82,6 +82,7 @@ export default function ProfilePage() {
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState<Gender | "">("");
   const [about, setAbout] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -93,20 +94,21 @@ export default function ProfilePage() {
       return;
     }
     let cancelled = false;
-    supabase
-      .from("profiles")
-      .select("gender, birth_date, about")
-      .eq("id", currentUser.id)
-      .single()
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (!error && data) {
-          setGender(data.gender ?? "");
-          setBirthDate(data.birth_date ?? "");
-          setAbout(data.about ?? "");
-        }
-        setIsLoadingProfile(false);
-      });
+    Promise.all([
+      supabase.from("profiles").select("gender, birth_date, about").eq("id", currentUser.id).single(),
+      // whatsapp has no client SELECT grant (see migration 0001) — reading it back for
+      // the owner to edit goes through get_my_whatsapp() instead.
+      supabase.rpc("get_my_whatsapp"),
+    ]).then(([profileResult, whatsappResult]) => {
+      if (cancelled) return;
+      if (!profileResult.error && profileResult.data) {
+        setGender(profileResult.data.gender ?? "");
+        setBirthDate(profileResult.data.birth_date ?? "");
+        setAbout(profileResult.data.about ?? "");
+      }
+      if (!whatsappResult.error) setWhatsapp(whatsappResult.data ?? "");
+      setIsLoadingProfile(false);
+    });
     return () => {
       cancelled = true;
     };
@@ -130,9 +132,15 @@ export default function ProfilePage() {
       gender,
       about: about.trim() || null,
     });
-    setIsSaving(false);
     if (error) {
+      setIsSaving(false);
       setSaveError(error.message);
+      return;
+    }
+    const { error: whatsappError } = await supabase.rpc("update_whatsapp", { p_whatsapp: whatsapp });
+    setIsSaving(false);
+    if (whatsappError) {
+      setSaveError(whatsappError.message);
       return;
     }
     setSaved(true);
@@ -164,7 +172,6 @@ export default function ProfilePage() {
           <Avatar url={currentUser.avatarUrl} initials={currentUser.avatar} className="h-14 w-14 text-lg" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-base font-bold text-slate-900">{currentUser.name}</p>
-            {currentUser.whatsapp && <p className="truncate text-sm text-slate-500">{currentUser.whatsapp}</p>}
           </div>
           <button
             type="button"
@@ -238,6 +245,20 @@ export default function ProfilePage() {
                   rows={3}
                   className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
                 />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-500">WhatsApp number (optional)</label>
+                <input
+                  type="tel"
+                  value={whatsapp}
+                  onChange={(e) => {
+                    setWhatsapp(e.target.value);
+                    setSaved(false);
+                  }}
+                  placeholder="e.g. +1 555 000 1111"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+                />
+                <p className="mt-1 text-xs text-slate-400">Only shown on a post if you choose to share it there.</p>
               </div>
 
               {saveError && <p className="text-xs text-rose-600">{saveError}</p>}

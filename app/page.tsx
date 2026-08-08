@@ -100,6 +100,8 @@ export type Post = {
   vibes: TripVibe[];
   bio: string;
   whatsapp: string;
+  /** Whether this post's author opted in to sharing their WhatsApp number for it. */
+  shareContact: boolean;
   /** ISO timestamp of when the post was created. Optional since older mock seed data predates this field. */
   createdAt?: string;
 };
@@ -449,6 +451,9 @@ type FormState = {
   dates: DateSearchUI;
   vibes: TripVibe[];
   bio: string;
+  shareContact: boolean;
+  /** Only used when shareContact is checked and the user has no number saved yet. */
+  contactDraft: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -456,6 +461,8 @@ const EMPTY_FORM: FormState = {
   dates: EMPTY_DATE_SEARCH,
   vibes: [],
   bio: "",
+  shareContact: false,
+  contactDraft: "",
 };
 
 function getDateSearchLabel(search: DateSearchUI | null): string {
@@ -540,6 +547,29 @@ function HomePageContent() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [postError, setPostError] = useState<string | null>(null);
   const [isSavingPost, setIsSavingPost] = useState(false);
+
+  // Whether the signed-in user already has a WhatsApp number on file — determines
+  // whether checking "share contact" on a post needs an inline number field too. Reset
+  // synchronously on user change (not in an effect) per the pattern used elsewhere in
+  // this file — see revealedForPostId below.
+  const [myWhatsapp, setMyWhatsapp] = useState<string | null>(null);
+  const [myWhatsappForUserId, setMyWhatsappForUserId] = useState<string | null>(null);
+  if ((currentUser?.id ?? null) !== myWhatsappForUserId) {
+    setMyWhatsappForUserId(currentUser?.id ?? null);
+    setMyWhatsapp(null);
+  }
+
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    supabase.rpc("get_my_whatsapp").then(({ data, error }) => {
+      if (cancelled || error) return;
+      setMyWhatsapp(data ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, supabase]);
 
   const monthOptions = useMemo(() => monthRangeOptions(2, 2), []);
 
@@ -687,6 +717,8 @@ function HomePageContent() {
               : { mode: "flexible", startDate: "", endDate: "", months: post.date.months },
         vibes: post.vibes,
         bio: post.bio,
+        shareContact: post.shareContact,
+        contactDraft: "",
       });
       setEditingPostId(post.id);
       setPostStep(0);
@@ -978,14 +1010,20 @@ function HomePageContent() {
     return hasActiveDateSearch(toSearchInput(form.dates));
   }
 
+  // Sharing is opt-in per post — checking the box with no number already on file
+  // requires typing one in right there before the post can go out.
+  function isContactStepValid(): boolean {
+    return !form.shareContact || Boolean(myWhatsapp) || form.contactDraft.trim() !== "";
+  }
+
   function isPostStepValid(step: 0 | 1 | 2): boolean {
     if (step === 0) return isDestinationStepValid();
     if (step === 1) return isDatesStepValid();
-    return true;
+    return isContactStepValid();
   }
 
   function isFormValid(): boolean {
-    return isDestinationStepValid() && isDatesStepValid();
+    return isDestinationStepValid() && isDatesStepValid() && isContactStepValid();
   }
 
   function openPostModal() {
@@ -1026,9 +1064,24 @@ function HomePageContent() {
     requireAuth(() => {
       setPostError(null);
       setIsSavingPost(true);
-      const input = { destinations, date, vibes: form.vibes, bio: form.bio };
-      const save = editingPostId ? editPost(editingPostId, input) : addPost(input);
-      save.then((error) => {
+
+      (async () => {
+        // A freshly-typed number needs saving to the profile before the post can
+        // reference it — same RPC path used by onboarding/account settings.
+        if (form.shareContact && !myWhatsapp && form.contactDraft.trim() !== "") {
+          const { error: whatsappError } = await supabase.rpc("update_whatsapp", {
+            p_whatsapp: form.contactDraft.trim(),
+          });
+          if (whatsappError) {
+            setIsSavingPost(false);
+            setPostError(whatsappError.message);
+            return;
+          }
+          setMyWhatsapp(form.contactDraft.trim());
+        }
+
+        const input = { destinations, date, vibes: form.vibes, bio: form.bio, shareContact: form.shareContact };
+        const error = editingPostId ? await editPost(editingPostId, input) : await addPost(input);
         setIsSavingPost(false);
         if (error) {
           setPostError(error);
@@ -1037,7 +1090,7 @@ function HomePageContent() {
         resetForm();
         setEditingPostId(null);
         setIsModalOpen(false);
-      });
+      })();
     });
   }
 
@@ -2062,6 +2115,39 @@ function HomePageContent() {
                         className="w-full resize-none rounded-xl border border-white/20 bg-white/10 px-3 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-orange-400 focus:ring-2 focus:ring-orange-400/30"
                       />
                     </div>
+
+                    <div className="rounded-xl bg-white/5 p-3 ring-1 ring-inset ring-white/10">
+                      <label className="flex cursor-pointer items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={form.shareContact}
+                          onChange={(e) => setForm((p) => ({ ...p, shareContact: e.target.checked }))}
+                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-white/30 bg-white/10 accent-emerald-500"
+                        />
+                        <span className="flex items-center gap-1.5 text-sm font-medium text-white">
+                          <IconWhatsApp className="h-3.5 w-3.5 text-emerald-400" />
+                          Share my WhatsApp number on this post
+                        </span>
+                      </label>
+
+                      {form.shareContact && !myWhatsapp && (
+                        <div className="mt-2.5 border-t border-white/10 pt-2.5">
+                          <label className="mb-1 block text-xs font-medium text-slate-300">
+                            You haven&apos;t added a number yet — enter one to share it here
+                          </label>
+                          <input
+                            type="tel"
+                            value={form.contactDraft}
+                            onChange={(e) => setForm((p) => ({ ...p, contactDraft: e.target.value }))}
+                            placeholder="e.g. +1 555 000 1111"
+                            className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-400 focus:border-orange-400 focus:ring-2 focus:ring-orange-400/30"
+                          />
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            Saved to your profile too, so you won&apos;t need to enter it again next time.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2237,32 +2323,34 @@ function HomePageContent() {
               <p className="mt-4 whitespace-pre-line text-sm leading-relaxed text-slate-600">{viewPost.bio}</p>
             </div>
 
-            <div className="sticky bottom-0 border-t border-slate-100 bg-white p-4">
-              {revealedContact ? (
-                <a
-                  href={revealedContact}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
-                >
-                  <IconWhatsApp className="h-4 w-4" />
-                  Message on WhatsApp
-                </a>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() =>
-                    requireAuth(() => {
-                      revealContact(viewPost.id).then((contact) => setRevealedContact(contact));
-                    })
-                  }
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
-                >
-                  <IconWhatsApp className="h-4 w-4" />
-                  {currentUser ? "Show WhatsApp contact" : "Log in to contact"}
-                </button>
-              )}
-            </div>
+            {viewPost.shareContact && (
+              <div className="sticky bottom-0 border-t border-slate-100 bg-white p-4">
+                {revealedContact ? (
+                  <a
+                    href={revealedContact}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
+                  >
+                    <IconWhatsApp className="h-4 w-4" />
+                    Message on WhatsApp
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      requireAuth(() => {
+                        revealContact(viewPost.id).then((contact) => setRevealedContact(contact));
+                      })
+                    }
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
+                  >
+                    <IconWhatsApp className="h-4 w-4" />
+                    {currentUser ? "Show WhatsApp contact" : "Log in to contact"}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

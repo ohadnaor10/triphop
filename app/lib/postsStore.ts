@@ -25,6 +25,7 @@ export type PostInput = {
   date: TripDate;
   vibes: TripVibe[];
   bio: string;
+  shareContact: boolean;
 };
 
 export type PostsStore = {
@@ -70,7 +71,11 @@ function useMockPostsStore(): PostsStore {
         date: input.date,
         vibes: input.vibes,
         bio: input.bio,
-        whatsapp: currentUser.whatsapp ? `https://wa.me/${currentUser.whatsapp.replace(/\D/g, "")}` : "",
+        // No Supabase backing in this fallback store, so there's no saved-number check
+        // or get_post_contact() to route through — the opt-in checkbox exists but has
+        // nothing real to reveal here.
+        whatsapp: "",
+        shareContact: input.shareContact,
         createdAt: new Date().toISOString(),
       };
       setPosts((prev) => [newPost, ...prev]);
@@ -82,7 +87,16 @@ function useMockPostsStore(): PostsStore {
   const editPost = useCallback(async (id: string, input: PostInput) => {
     setPosts((prev) =>
       prev.map((p) =>
-        p.id === id ? { ...p, destinations: input.destinations, date: input.date, vibes: input.vibes, bio: input.bio } : p,
+        p.id === id
+          ? {
+              ...p,
+              destinations: input.destinations,
+              date: input.date,
+              vibes: input.vibes,
+              bio: input.bio,
+              shareContact: input.shareContact,
+            }
+          : p,
       ),
     );
     return null;
@@ -127,6 +141,7 @@ type PostRow = {
   date: TripDate;
   vibes: TripVibe[];
   bio: string;
+  share_contact: boolean;
   created_at: string;
   profiles: {
     name: string;
@@ -143,7 +158,7 @@ type PostRow = {
 // The `!user_id` hint disambiguates the embed for PostgREST when it can see more than
 // one possible join path between posts and profiles.
 const POST_SELECT =
-  "id, user_id, destinations, date, vibes, bio, created_at, profiles!user_id(name, age, gender, avatar_color, avatar_url, about)";
+  "id, user_id, destinations, date, vibes, bio, share_contact, created_at, profiles!user_id(name, age, gender, avatar_color, avatar_url, about)";
 
 function rowToPost(row: PostRow): Post {
   const profile = row.profiles;
@@ -163,6 +178,7 @@ function rowToPost(row: PostRow): Post {
     vibes: row.vibes,
     bio: row.bio,
     whatsapp: "",
+    shareContact: row.share_contact,
     createdAt: row.created_at,
   };
 }
@@ -223,7 +239,14 @@ function useSupabasePostsStore(): PostsStore {
       if (!currentUser) return "Not signed in";
       const { data, error } = await supabase
         .from("posts")
-        .insert({ user_id: currentUser.id, destinations: input.destinations, date: input.date, vibes: input.vibes, bio: input.bio })
+        .insert({
+          user_id: currentUser.id,
+          destinations: input.destinations,
+          date: input.date,
+          vibes: input.vibes,
+          bio: input.bio,
+          share_contact: input.shareContact,
+        })
         .select(POST_SELECT)
         .single();
       if (error || !data) {
@@ -240,7 +263,13 @@ function useSupabasePostsStore(): PostsStore {
     async (id: string, input: PostInput) => {
       const { data, error } = await supabase
         .from("posts")
-        .update({ destinations: input.destinations, date: input.date, vibes: input.vibes, bio: input.bio })
+        .update({
+          destinations: input.destinations,
+          date: input.date,
+          vibes: input.vibes,
+          bio: input.bio,
+          share_contact: input.shareContact,
+        })
         .eq("id", id)
         .select(POST_SELECT)
         .single();
