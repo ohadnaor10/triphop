@@ -48,6 +48,7 @@ import {
 } from "./lib/geo";
 import { hasActiveDateSearch, rankByRelevance, type DateSearchInput } from "./lib/relevance";
 import { useAuth } from "./context/AuthContext";
+import { useUnreadMessageCount } from "./lib/messagesStore";
 import { usePostsStore } from "./lib/postsStore";
 import { useClerkSupabaseClient } from "./lib/supabase/useClerkSupabaseClient";
 
@@ -510,6 +511,7 @@ function HomePageContent() {
   const searchParams = useSearchParams();
   const supabase = useClerkSupabaseClient();
   const { posts, savedPostIds, addPost, editPost, removePost, toggleSaved, revealContact } = usePostsStore();
+  const unreadMessageCount = useUnreadMessageCount();
   const [revealedContact, setRevealedContact] = useState<string | null>(null);
   const [view, setView] = useState<"feed" | "map">("feed");
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
@@ -1414,6 +1416,21 @@ function HomePageContent() {
               >
                 <IconHeart className="h-4.5 w-4.5" filled={showSavedOnly} />
               </button>
+              {currentUser && (
+                <button
+                  type="button"
+                  onClick={() => router.push("/messages")}
+                  aria-label={unreadMessageCount > 0 ? `Messages, ${unreadMessageCount} unread` : "Messages"}
+                  className="relative flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition active:scale-95 active:bg-slate-200"
+                >
+                  <IconMessageCircle className="h-4.5 w-4.5" />
+                  {unreadMessageCount > 0 && (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] font-bold text-white ring-2 ring-white">
+                      {unreadMessageCount > 9 ? "9+" : unreadMessageCount}
+                    </span>
+                  )}
+                </button>
+              )}
               {!currentUser && (
                 <div className="flex items-center gap-1.5">
                   <button
@@ -2323,32 +2340,42 @@ function HomePageContent() {
               <p className="mt-4 whitespace-pre-line text-sm leading-relaxed text-slate-600">{viewPost.bio}</p>
             </div>
 
-            {viewPost.shareContact && (
-              <div className="sticky bottom-0 border-t border-slate-100 bg-white p-4">
-                {revealedContact ? (
-                  <a
-                    href={revealedContact}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
-                  >
-                    <IconWhatsApp className="h-4 w-4" />
-                    Message on WhatsApp
-                  </a>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      requireAuth(() => {
-                        revealContact(viewPost.id).then((contact) => setRevealedContact(contact));
-                      })
-                    }
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
-                  >
-                    <IconWhatsApp className="h-4 w-4" />
-                    {currentUser ? "Show WhatsApp contact" : "Log in to contact"}
-                  </button>
-                )}
+            {viewPost.userId !== currentUser?.id && (
+              <div className="sticky bottom-0 flex items-center gap-2 border-t border-slate-100 bg-white p-4">
+                <button
+                  type="button"
+                  onClick={() => requireAuth(() => router.push(`/messages/${viewPost.userId}`))}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-slate-800"
+                >
+                  <IconMessageCircle className="h-4 w-4" />
+                  Message
+                </button>
+
+                {viewPost.shareContact &&
+                  (revealedContact ? (
+                    <a
+                      href={revealedContact}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
+                    >
+                      <IconWhatsApp className="h-4 w-4" />
+                      WhatsApp
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        requireAuth(() => {
+                          revealContact(viewPost.id).then((contact) => setRevealedContact(contact));
+                        })
+                      }
+                      className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
+                    >
+                      <IconWhatsApp className="h-4 w-4" />
+                      {currentUser ? "WhatsApp" : "Log in"}
+                    </button>
+                  ))}
               </div>
             )}
           </div>
@@ -2404,12 +2431,11 @@ function HomePageContent() {
                     )}
                     <button
                       type="button"
-                      disabled
-                      title="Chat is coming soon"
-                      className="mt-1 flex cursor-not-allowed items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-400"
+                      onClick={() => requireAuth(() => router.push(`/messages/${viewUserId}`))}
+                      className="mt-1 flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition active:scale-95 active:bg-slate-800"
                     >
                       <IconMessageCircle className="h-4 w-4" />
-                      Message (coming soon)
+                      Message
                     </button>
                   </div>
 

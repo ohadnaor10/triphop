@@ -200,3 +200,18 @@ export function IconMessageCircle(props: { className?: string }) {
     </svg>
   );
 }
+
+export function IconSend(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={props.className}>
+      <path
+        d="M21 3 3 10.5l7.5 3L14 21l7-18Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M10.5 13.5 21 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
