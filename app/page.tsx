@@ -483,6 +483,80 @@ function withViewTransition(fn: () => void) {
   }
 }
 
+// Persists the hero/feed search across a full route unmount (visiting /profile or
+// /messages and coming back) so returning to "/" resumes exactly where the user left
+// off instead of re-showing the first-run hero. sessionStorage rather than localStorage
+// — this is "resume this browsing session," not a permanent preference, and should
+// naturally clear itself once the tab closes.
+const FEED_STATE_STORAGE_KEY = "triphop:feedState";
+
+type StoredFeedState = {
+  hasSearched: boolean;
+  view: "feed" | "map";
+  selectedDestinations: SearchDestination[];
+  vibeFilter: TripVibe | "All";
+  appliedDateSearch: DateSearchUI | null;
+  genderFilter: Gender | "All";
+  ageMinFilter: string;
+  ageMaxFilter: string;
+  showSavedOnly: boolean;
+};
+
+function readStoredFeedState(): StoredFeedState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(FEED_STATE_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StoredFeedState) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredFeedState(state: StoredFeedState) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(FEED_STATE_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Private-browsing / storage-full edge cases can throw here — losing the "resume
+    // where I left off" niceties isn't worth crashing the app over.
+  }
+}
+
+// Separate key from the search/filter state above: this changes on every scroll tick
+// (high write frequency) while the filters above only change on deliberate user action,
+// so keeping them apart avoids re-serializing the filter blob on every scroll pixel.
+const FEED_SCROLL_STORAGE_KEY = "triphop:feedScroll";
+
+type StoredFeedScroll = { scrollY: number; loadedCount: number };
+
+function readStoredFeedScroll(): StoredFeedScroll | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(FEED_SCROLL_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StoredFeedScroll) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredFeedScroll(state: StoredFeedScroll) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(FEED_SCROLL_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // See writeStoredFeedState.
+  }
+}
+
+function clearStoredFeedScroll() {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(FEED_SCROLL_STORAGE_KEY);
+  } catch {
+    // See writeStoredFeedState.
+  }
+}
+
 // useSearchParams() (used below to open a post via /?post=<id>, see the profile page's
 // "My posts" links) requires a Suspense boundary around anything that reads it.
 export default function HomePage() {
@@ -499,20 +573,30 @@ function HomePageContent() {
   const searchParams = useSearchParams();
   const supabase = useClerkSupabaseClient();
   const unreadMessageCount = useUnreadMessageCount();
+  // Read once, synchronously, on first mount — before anything below initializes off
+  // of it. Not a useMemo: this must run exactly once per mount (a fresh reference on
+  // every render would defeat the point of a single stable "what did we resume" value).
+  const [restoredFeedState] = useState(() => readStoredFeedState());
+  const [restoredFeedScroll] = useState(() => readStoredFeedScroll());
+
   const [revealedContact, setRevealedContact] = useState<string | null>(null);
-  const [view, setView] = useState<"feed" | "map">("feed");
+  const [view, setView] = useState<"feed" | "map">(restoredFeedState?.view ?? "feed");
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
-  const [selectedDestinations, setSelectedDestinations] = useState<SearchDestination[]>([]);
+  const [selectedDestinations, setSelectedDestinations] = useState<SearchDestination[]>(
+    restoredFeedState?.selectedDestinations ?? [],
+  );
   const [destinationPickerCloseOnSelect, setDestinationPickerCloseOnSelect] = useState(true);
   const [destinationQuery, setDestinationQuery] = useState("");
-  const [vibeFilter, setVibeFilter] = useState<TripVibe | "All">("All");
-  const [appliedDateSearch, setAppliedDateSearch] = useState<DateSearchUI | null>(null);
+  const [vibeFilter, setVibeFilter] = useState<TripVibe | "All">(restoredFeedState?.vibeFilter ?? "All");
+  const [appliedDateSearch, setAppliedDateSearch] = useState<DateSearchUI | null>(
+    restoredFeedState?.appliedDateSearch ?? null,
+  );
   const [dateSearchDraft, setDateSearchDraft] = useState<DateSearchUI>(EMPTY_DATE_SEARCH);
-  const [genderFilter, setGenderFilter] = useState<Gender | "All">("All");
-  const [ageMinFilter, setAgeMinFilter] = useState("");
-  const [ageMaxFilter, setAgeMaxFilter] = useState("");
+  const [genderFilter, setGenderFilter] = useState<Gender | "All">(restoredFeedState?.genderFilter ?? "All");
+  const [ageMinFilter, setAgeMinFilter] = useState(restoredFeedState?.ageMinFilter ?? "");
+  const [ageMaxFilter, setAgeMaxFilter] = useState(restoredFeedState?.ageMaxFilter ?? "");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [postStep, setPostStep] = useState<0 | 1 | 2>(0);
   const [postDestQuery, setPostDestQuery] = useState("");
@@ -524,7 +608,7 @@ function HomePageContent() {
   const [viewUserId, setViewUserId] = useState<string | null>(null);
   const [isTripMapOpen, setIsTripMapOpen] = useState(false);
   const [tripMapPoints, setTripMapPoints] = useState<GeoPoint[]>([]);
-  const [showSavedOnly, setShowSavedOnly] = useState(false);
+  const [showSavedOnly, setShowSavedOnly] = useState(restoredFeedState?.showSavedOnly ?? false);
 
   // Referentially stable unless one of these state values actually changes (all are
   // useState values themselves, so this only produces a new object when a filter really
@@ -541,16 +625,74 @@ function HomePageContent() {
     }),
     [selectedDestinations, vibeFilter, genderFilter, ageMinFilter, ageMaxFilter, showSavedOnly, appliedDateSearch],
   );
-  const { posts, savedPostIds, hasMore, loadingMore, loadMore, addPost, editPost, removePost, toggleSaved, revealContact } =
+  const { posts, loading, savedPostIds, hasMore, loadingMore, loadMore, addPost, editPost, removePost, toggleSaved, revealContact } =
     usePostsStore(filters);
 
   const [openHeroField, setOpenHeroField] = useState<"destination" | "dates" | "filters" | null>(null);
   // Whether the user has performed their first search yet — gates the full-screen,
   // centered destination/dates prompt (see below) that replaces the feed on first run,
   // so a first-time visitor sees an inviting, focused "what do I search for" moment
-  // instead of a wall of posts with no context.
-  const [hasSearched, setHasSearched] = useState(false);
+  // instead of a wall of posts with no context. Restored from sessionStorage so
+  // navigating to /profile or /messages and back resumes the feed instead of
+  // re-showing the hero — only an explicit tap on the logo (see the header below)
+  // should ever bring the hero back.
+  const [hasSearched, setHasSearched] = useState(restoredFeedState?.hasSearched ?? false);
   const heroRef = useRef<HTMLDivElement>(null);
+
+  // Persist the hero/feed search whenever it meaningfully changes, so a later mount
+  // (after visiting /profile or /messages) can resume it via restoredFeedState above.
+  useEffect(() => {
+    writeStoredFeedState({
+      hasSearched,
+      view,
+      selectedDestinations,
+      vibeFilter,
+      appliedDateSearch,
+      genderFilter,
+      ageMinFilter,
+      ageMaxFilter,
+      showSavedOnly,
+    });
+  }, [hasSearched, view, selectedDestinations, vibeFilter, appliedDateSearch, genderFilter, ageMinFilter, ageMaxFilter, showSavedOnly]);
+
+  // Tracks how far into the feed the user has scrolled (and how many posts that took),
+  // so the restore effect below can reload the same number of pages and land on the
+  // same spot. A ref rather than a `posts.length` effect dependency — this only needs
+  // the *current* count when a scroll event fires, not a reason to rebind the listener
+  // on every page load.
+  const postsLengthRef = useRef(posts.length);
+  useEffect(() => {
+    postsLengthRef.current = posts.length;
+  }, [posts.length]);
+
+  useEffect(() => {
+    if (!hasSearched || view !== "feed") return;
+    function handleScroll() {
+      writeStoredFeedScroll({ scrollY: window.scrollY, loadedCount: postsLengthRef.current });
+    }
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [hasSearched, view]);
+
+  // Restores the scroll position captured above: reloads pages until at least as many
+  // posts are back as were loaded before, then scrolls once. Runs at most once per
+  // mount (restoredScrollDoneRef), so it never fights the user's own scrolling
+  // afterward, and bails immediately if there's nothing to restore.
+  const restoredScrollDoneRef = useRef(false);
+  useEffect(() => {
+    if (restoredScrollDoneRef.current) return;
+    if (!restoredFeedScroll || !hasSearched || view !== "feed") {
+      restoredScrollDoneRef.current = true;
+      return;
+    }
+    if (loading) return; // wait for the initial fetch to resolve
+    if (posts.length < restoredFeedScroll.loadedCount && hasMore) {
+      if (!loadingMore) loadMore();
+      return;
+    }
+    restoredScrollDoneRef.current = true;
+    requestAnimationFrame(() => window.scrollTo(0, restoredFeedScroll.scrollY));
+  }, [restoredFeedScroll, hasSearched, view, loading, posts.length, hasMore, loadingMore, loadMore]);
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [postError, setPostError] = useState<string | null>(null);
@@ -1346,7 +1488,12 @@ function HomePageContent() {
           <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
             <button
               type="button"
-              onClick={() => withViewTransition(() => setHasSearched(false))}
+              onClick={() =>
+                withViewTransition(() => {
+                  clearStoredFeedScroll();
+                  setHasSearched(false);
+                })
+              }
               aria-label="Back to search"
               style={{ viewTransitionName: "logo" }}
               className="text-xl font-extrabold tracking-tight text-slate-900 transition active:scale-95"
