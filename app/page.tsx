@@ -39,17 +39,14 @@ import {
   getAllCountries,
   getCitiesOfCountry,
   getCountryByCode,
-  isGeographicallyRelevant,
   REGION_CENTROIDS,
   REGIONS,
-  warmGeocode,
-  type GeoDestination,
   type Region,
 } from "./lib/geo";
-import { hasActiveDateSearch, rankByRelevance, type DateSearchInput } from "./lib/relevance";
+import { hasActiveDateSearch, type DateSearchInput } from "./lib/relevance";
 import { useAuth } from "./context/AuthContext";
 import { useUnreadMessageCount } from "./lib/messagesStore";
-import { usePostsStore } from "./lib/postsStore";
+import { usePostsStore, type PostsFilters } from "./lib/postsStore";
 import { useClerkSupabaseClient } from "./lib/supabase/useClerkSupabaseClient";
 
 const TripMap = dynamic(() => import("./components/TripMap"), {
@@ -245,24 +242,15 @@ function getDestinationChips(destinations: Destination[]): { chips: string[]; mo
   return { chips: shown.map(getSingleDestinationLabel), moreCount: destinations.length - shown.length };
 }
 
+// bbox/countryCode on the "place" variant carry a picked Mapbox geocoding suggestion's
+// already-resolved result (see geocodeSuggestions() in lib/geo.ts) through to the
+// search_posts() RPC (supabase/migrations/0013_search_posts_rpc.sql) for cross-border
+// bbox-overlap matching — set once, at selection time, never re-resolved later.
 export type SearchDestination =
   | { type: "country"; code: string; name: string }
   | { type: "city"; name: string; countryCode: string; countryName: string }
   | { type: "region"; name: Region }
-  | { type: "place"; name: string; placeType: string };
-
-function toGeoDestination(sel: SearchDestination): GeoDestination {
-  if (sel.type === "country") return { mode: "focused", country: sel.name, countryCode: sel.code, cities: [] };
-  if (sel.type === "city") {
-    return { mode: "focused", country: sel.countryName, countryCode: sel.countryCode, cities: [sel.name] };
-  }
-  if (sel.type === "region") return { mode: "broad", regions: [sel.name] };
-  return { mode: "place", name: sel.name };
-}
-
-function postMatchesDestinationSearch(destinations: Destination[], selected: SearchDestination[]): boolean {
-  return isGeographicallyRelevant(selected.map(toGeoDestination), destinations);
-}
+  | { type: "place"; name: string; placeType: string; countryCode?: string; bbox?: [number, number, number, number] };
 
 function getDateLabel(date: TripDate, compact = false): string {
   if (date.mode === "focused") {
@@ -510,8 +498,6 @@ function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = useClerkSupabaseClient();
-  const { posts, savedPostIds, hasMore, loadingMore, loadMore, addPost, editPost, removePost, toggleSaved, revealContact } =
-    usePostsStore();
   const unreadMessageCount = useUnreadMessageCount();
   const [revealedContact, setRevealedContact] = useState<string | null>(null);
   const [view, setView] = useState<"feed" | "map">("feed");
@@ -539,6 +525,25 @@ function HomePageContent() {
   const [isTripMapOpen, setIsTripMapOpen] = useState(false);
   const [tripMapPoints, setTripMapPoints] = useState<GeoPoint[]>([]);
   const [showSavedOnly, setShowSavedOnly] = useState(false);
+
+  // Referentially stable unless one of these state values actually changes (all are
+  // useState values themselves, so this only produces a new object when a filter really
+  // changed) — usePostsStore depends on it to know when to re-run its search.
+  const filters: PostsFilters = useMemo(
+    () => ({
+      destinations: selectedDestinations,
+      vibe: vibeFilter,
+      gender: genderFilter,
+      ageMin: ageMinFilter,
+      ageMax: ageMaxFilter,
+      savedOnly: showSavedOnly,
+      dateSearch: appliedDateSearch ? toSearchInput(appliedDateSearch) : null,
+    }),
+    [selectedDestinations, vibeFilter, genderFilter, ageMinFilter, ageMaxFilter, showSavedOnly, appliedDateSearch],
+  );
+  const { posts, savedPostIds, hasMore, loadingMore, loadMore, addPost, editPost, removePost, toggleSaved, revealContact } =
+    usePostsStore(filters);
+
   const [openHeroField, setOpenHeroField] = useState<"destination" | "dates" | "filters" | null>(null);
   // Whether the user has performed their first search yet — gates the full-screen,
   // centered destination/dates prompt (see below) that replaces the feed on first run,
@@ -732,65 +737,6 @@ function HomePageContent() {
     });
   }
 
-  // Cross-border spatial matching (e.g. search "Alps" vs a post in "France") needs bbox
-  // data isGeographicallyRelevant() can't fetch itself (it's pure/sync). Warm the geocode
-  // cache for the active "place" search terms plus every country appearing in posts, in
-  // the background — once populated, bumping geoWarmTick lets bbox-based matches surface
-  // without ever blocking the filter computation on a network round-trip.
-  const [geoWarmTick, setGeoWarmTick] = useState(0);
-
-  useEffect(() => {
-    const placeNames = selectedDestinations.filter((d) => d.type === "place").map((d) => d.name);
-    if (placeNames.length === 0) return;
-    const countryNames = [
-      ...new Set(
-        posts
-          .flatMap((p) => p.destinations)
-          .filter((d): d is FocusedDestination => d.mode === "focused")
-          .map((d) => d.country),
-      ),
-    ];
-    let cancelled = false;
-    Promise.all([...placeNames, ...countryNames].map((name) => warmGeocode(name))).then(() => {
-      if (!cancelled) setGeoWarmTick((t) => t + 1);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedDestinations, posts]);
-
-  const filteredPosts = useMemo(() => {
-    const base = posts.filter((post) => {
-      const matchesRegion = postMatchesDestinationSearch(post.destinations, selectedDestinations);
-      const matchesVibe = vibeFilter === "All" || post.vibes.includes(vibeFilter);
-      const matchesGender = genderFilter === "All" || post.user.gender === genderFilter;
-      const ageMin = ageMinFilter.trim() === "" ? null : Number(ageMinFilter);
-      const ageMax = ageMaxFilter.trim() === "" ? null : Number(ageMaxFilter);
-      const matchesAge = (ageMin === null || post.user.age >= ageMin) && (ageMax === null || post.user.age <= ageMax);
-      const matchesSaved = !showSavedOnly || savedPostIds.has(post.id);
-      return matchesRegion && matchesVibe && matchesGender && matchesAge && matchesSaved;
-    });
-
-    if (!appliedDateSearch) return base;
-    const searchInput = toSearchInput(appliedDateSearch);
-    if (!hasActiveDateSearch(searchInput)) return base;
-    return rankByRelevance(base, searchInput, (post) => post.date);
-    // geoWarmTick isn't read directly — it forces a recompute once warmGeocode() has
-    // populated the bbox cache that postMatchesDestinationSearch reads synchronously.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    posts,
-    selectedDestinations,
-    vibeFilter,
-    genderFilter,
-    ageMinFilter,
-    ageMaxFilter,
-    showSavedOnly,
-    savedPostIds,
-    appliedDateSearch,
-    geoWarmTick,
-  ]);
-
   // Fetches the next page of posts once the sentinel at the bottom of the feed list
   // scrolls into view, instead of a manual "load more" click.
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
@@ -871,7 +817,13 @@ function HomePageContent() {
       geocodeSuggestions(query).then((results) => {
         if (cancelled) return;
         setPlaceSuggestions(
-          results.map((r) => ({ type: "place" as const, name: r.name, placeType: r.placeType })),
+          results.map((r) => ({
+            type: "place" as const,
+            name: r.name,
+            placeType: r.placeType,
+            countryCode: r.countryCode,
+            bbox: r.bbox,
+          })),
         );
       });
     }, 300);
@@ -964,13 +916,13 @@ function HomePageContent() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all(filteredPosts.map((post) => getFeedMapPost(post))).then((results) => {
+    Promise.all(posts.map((post) => getFeedMapPost(post))).then((results) => {
       if (!cancelled) setMapMarkers(results.filter((r): r is FeedMapPost => r !== null));
     });
     return () => {
       cancelled = true;
     };
-  }, [filteredPosts]);
+  }, [posts]);
 
   // Derived rather than synced via effect: once a post drops out of mapMarkers (filtered
   // out or no longer has a specific destination), its pin — and thus its focus — is gone.
@@ -1750,13 +1702,13 @@ function HomePageContent() {
               <p className="text-xs text-slate-500">Browse trips and reach out to plan together.</p>
             </div>
 
-            {filteredPosts.length === 0 && (
+            {posts.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-sm text-slate-500">
                 No trips match your filters yet.
               </div>
             )}
 
-            {filteredPosts.map((post) => (
+            {posts.map((post) => (
               <div
                 key={post.id}
                 role="button"

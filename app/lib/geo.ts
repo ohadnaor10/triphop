@@ -3,6 +3,7 @@ import turfBbox from "@turf/bbox";
 import turfUnion from "@turf/union";
 import { City, Country } from "country-state-city";
 import worldCountries from "world-countries";
+import type { Destination, SearchDestination } from "../page";
 // Real (Natural Earth 1:50m) country boundary polygons, precomputed offline by
 // scripts/build-country-boundaries.mjs — decoded from TopoJSON, antimeridian-unwrapped,
 // and stripped of far-flung overseas territories ahead of time so this ships as a plain
@@ -493,4 +494,21 @@ export function isGeographicallyRelevant(
   const searchEntities = searchDestinations.flatMap(toEntities);
   const postEntities = postDestinations.flatMap(toEntities);
   return searchEntities.some((s) => postEntities.some((p) => entitiesRelated(s, p)));
+}
+
+// Used only by the mock (pre-Supabase-setup) posts store — app/lib/postsStore.ts's
+// Supabase-backed store does this same matching server-side via the search_posts() RPC
+// (see supabase/migrations/0013_search_posts_rpc.sql), which sources country bboxes
+// from country_bbox instead of a live geocode of the country's name.
+export function toGeoDestination(sel: SearchDestination): GeoDestination {
+  if (sel.type === "country") return { mode: "focused", country: sel.name, countryCode: sel.code, cities: [] };
+  if (sel.type === "city") {
+    return { mode: "focused", country: sel.countryName, countryCode: sel.countryCode, cities: [sel.name] };
+  }
+  if (sel.type === "region") return { mode: "broad", regions: [sel.name] };
+  return { mode: "place", name: sel.name };
+}
+
+export function postMatchesDestinationSearch(destinations: Destination[], selected: SearchDestination[]): boolean {
+  return isGeographicallyRelevant(selected.map(toGeoDestination), destinations);
 }

@@ -16,7 +16,7 @@ import {
 } from "../components/icons";
 import { useAuth } from "../context/AuthContext";
 import { calculateAge } from "../lib/calendar";
-import { usePostsStore } from "../lib/postsStore";
+import { useMyPosts } from "../lib/postsStore";
 import { useClerkSupabaseClient } from "../lib/supabase/useClerkSupabaseClient";
 import type { Gender, Post } from "../page";
 
@@ -77,7 +77,7 @@ export default function ProfilePage() {
   const { currentUser, isAuthLoaded } = useAuth();
   const { openUserProfile } = useClerk();
   const supabase = useClerkSupabaseClient();
-  const { posts, removePost } = usePostsStore();
+  const { posts, removePost } = useMyPosts();
 
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState<Gender | "">("");
@@ -120,7 +120,7 @@ export default function ProfilePage() {
 
   if (!currentUser) return null;
 
-  const myPosts = posts.filter((p) => p.userId === currentUser.id);
+  const myPosts = posts;
 
   async function handleSaveDetails() {
     if (!currentUser) return;
