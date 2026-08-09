@@ -27,9 +27,6 @@ import type { FeedMapPoint, FeedMapPost } from "./components/TripMap";
 import Avatar from "./components/Avatar";
 import Combobox from "./components/Combobox";
 import CalendarRangePicker from "./components/CalendarRangePicker";
-import DestinationPickerOverlay from "./components/DestinationPickerOverlay";
-import PostDestinationCarousel from "./components/PostDestinationCarousel";
-import DatePickerOverlay from "./components/DatePickerOverlay";
 import DateSearchFields from "./components/DateSearchFields";
 import MonthCarousel from "./components/MonthCarousel";
 import { getPopularDestinations } from "./data/popularDestinations";
@@ -483,6 +480,15 @@ function withViewTransition(fn: () => void) {
   }
 }
 
+// A single scrollTo() loses the race against whatever else settles right after the
+// target content lands — images finishing, the sticky header's layout, Next's own
+// post-navigation scroll handling. Reasserting for a handful of frames outlasts all of
+// that instead of guessing which one goes last.
+function reassertScrollTo(y: number, framesLeft = 10) {
+  window.scrollTo(0, y);
+  if (framesLeft > 1) requestAnimationFrame(() => reassertScrollTo(y, framesLeft - 1));
+}
+
 // Persists the hero/feed search across a full route unmount (visiting /profile or
 // /messages and coming back) so returning to "/" resumes exactly where the user left
 // off instead of re-showing the first-run hero. sessionStorage rather than localStorage
@@ -587,7 +593,6 @@ function HomePageContent() {
   const [selectedDestinations, setSelectedDestinations] = useState<SearchDestination[]>(
     restoredFeedState?.selectedDestinations ?? [],
   );
-  const [destinationPickerCloseOnSelect, setDestinationPickerCloseOnSelect] = useState(true);
   const [destinationQuery, setDestinationQuery] = useState("");
   const [vibeFilter, setVibeFilter] = useState<TripVibe | "All">(restoredFeedState?.vibeFilter ?? "All");
   const [appliedDateSearch, setAppliedDateSearch] = useState<DateSearchUI | null>(
@@ -691,20 +696,25 @@ function HomePageContent() {
       return;
     }
     restoredScrollDoneRef.current = true;
-    const targetY = restoredFeedScroll.scrollY;
-    // A single scrollTo() loses the race against whatever else settles right after the
-    // freshly-loaded cards land — avatar images finishing, the sticky header's layout,
-    // and (on this route) Next's own post-navigation scroll-to-top all land in this same
-    // window. Reasserting for a handful of frames outlasts all of that instead of
-    // guessing which one goes last.
-    let framesLeft = 10;
-    function reassertScroll() {
-      window.scrollTo(0, targetY);
-      framesLeft -= 1;
-      if (framesLeft > 0) requestAnimationFrame(reassertScroll);
-    }
-    requestAnimationFrame(reassertScroll);
+    requestAnimationFrame(() => reassertScrollTo(restoredFeedScroll.scrollY));
   }, [restoredFeedScroll, hasSearched, view, loading, posts.length, hasMore, loadingMore, loadMore]);
+
+  // Switching to the map view unmounts the feed list, so returning to it always lands
+  // back at the top unless the scroll position is captured first — the store's posts
+  // stay in memory across the toggle, so (unlike the cross-page restore above) there's
+  // no reload-more-pages step needed, just capture-then-reassert.
+  const feedScrollBeforeMapRef = useRef<number | null>(null);
+  function switchToMapView() {
+    if (view === "feed") feedScrollBeforeMapRef.current = window.scrollY;
+    setView("map");
+  }
+  function switchToFeedView() {
+    setView("feed");
+    const targetY = feedScrollBeforeMapRef.current;
+    if (targetY === null) return;
+    feedScrollBeforeMapRef.current = null;
+    requestAnimationFrame(() => reassertScrollTo(targetY));
+  }
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [postError, setPostError] = useState<string | null>(null);
@@ -1017,10 +1027,9 @@ function HomePageContent() {
     return { countries, regions, cities, places };
   }, [destinationQuery, allPostCities, placeSuggestions]);
 
-  // Post-creation destination picker: same search + infinite-scroll carousel of
-  // countries/regions as the hero search (see DestinationPickerOverlay), restricted to
-  // country/region cards since cities are handled per-country below (see the "add
-  // specific places" reveal).
+  // Post-creation destination picker: same country/region search as the feed's
+  // destination panel (see renderDestinationPanel), restricted to country/region rows
+  // since cities are handled per-country below (see the "add specific places" reveal).
   const postDestinationCards = useMemo((): SearchDestination[] => {
     const q = postDestQuery.trim().toLowerCase();
     if (q === "") {
@@ -1243,11 +1252,7 @@ function HomePageContent() {
       >
         <button
           type="button"
-          onClick={() => {
-            const opening = openHeroField !== "destination";
-            if (opening) setDestinationPickerCloseOnSelect(selectedDestinations.length === 0);
-            setOpenHeroField(openHeroField === "destination" ? null : "destination");
-          }}
+          onClick={() => setOpenHeroField(openHeroField === "destination" ? null : "destination")}
           className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left ${
             size === "lg" ? "px-4 py-4" : "px-3 py-2.5"
           }`}
@@ -1266,10 +1271,7 @@ function HomePageContent() {
         {hasSelection && (
           <button
             type="button"
-            onClick={() => {
-              setDestinationPickerCloseOnSelect(false);
-              setOpenHeroField("destination");
-            }}
+            onClick={() => setOpenHeroField("destination")}
             aria-label="Choose more destinations"
             className={`mr-2 flex shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 active:scale-90 ${
               size === "lg" ? "h-7 w-7" : "h-6 w-6"
@@ -1516,7 +1518,7 @@ function HomePageContent() {
               <div className="flex items-stretch gap-0.5 rounded-full bg-slate-100 p-0.5">
                 <button
                   type="button"
-                  onClick={() => setView("feed")}
+                  onClick={switchToFeedView}
                   className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
                     view === "feed" ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-700"
                   }`}
@@ -1526,7 +1528,7 @@ function HomePageContent() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setView("map")}
+                  onClick={switchToMapView}
                   className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
                     view === "map" ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-700"
                   }`}
@@ -1809,53 +1811,8 @@ function HomePageContent() {
                 {renderDatesTrigger("lg")}
               </div>
 
-              {openHeroField === "destination" && (
-                <DestinationPickerOverlay
-                  query={destinationQuery}
-                  onQueryChange={setDestinationQuery}
-                  results={destinationResults}
-                  destinationKey={destinationKey}
-                  selectedDestinations={selectedDestinations}
-                  closeOnSelect={destinationPickerCloseOnSelect}
-                  onSelect={(dest) => withViewTransition(() => toggleSelectedDestination(dest))}
-                  onClear={() => withViewTransition(() => setSelectedDestinations([]))}
-                  onClose={() => setOpenHeroField(null)}
-                />
-              )}
-
-              {openHeroField === "dates" && (
-                <DatePickerOverlay
-                  draft={dateSearchDraft}
-                  onDraftChange={setDateSearchDraft}
-                  monthOptions={monthOptions}
-                  currentMonth={currentMonthKey()}
-                  formatMonth={formatMonth}
-                  onAutoApply={(next) =>
-                    withViewTransition(() => {
-                      setAppliedDateSearch(next);
-                      setOpenHeroField(null);
-                    })
-                  }
-                  onApply={() =>
-                    withViewTransition(() => {
-                      const hasContent =
-                        dateSearchDraft.mode === "specific"
-                          ? Boolean(dateSearchDraft.startDate && dateSearchDraft.endDate)
-                          : dateSearchDraft.months.length > 0;
-                      setAppliedDateSearch(hasContent ? dateSearchDraft : null);
-                      setOpenHeroField(null);
-                    })
-                  }
-                  onClear={() =>
-                    withViewTransition(() => {
-                      setDateSearchDraft(EMPTY_DATE_SEARCH);
-                      setAppliedDateSearch(null);
-                      setOpenHeroField(null);
-                    })
-                  }
-                  onClose={() => setOpenHeroField(null)}
-                />
-              )}
+              {renderDestinationPanel()}
+              {renderDatesPanel()}
             </div>
 
             <button
@@ -2140,12 +2097,22 @@ function HomePageContent() {
                     {postDestinationCards.length === 0 ? (
                       <p className="text-center text-sm text-slate-400">No matches found</p>
                     ) : (
-                      <PostDestinationCarousel
-                        items={postDestinationCards}
-                        isSearching={postDestQuery.trim() !== ""}
-                        isSelected={isDestinationChosen}
-                        onSelect={toggleDestinationChoice}
-                      />
+                      <div className="flex flex-col gap-1">
+                        {postDestinationCards.map((d) => (
+                          <button
+                            key={`${d.type}:${d.type === "country" ? d.code : d.name}`}
+                            type="button"
+                            onClick={() => toggleDestinationChoice(d)}
+                            className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
+                              isDestinationChosen(d)
+                                ? "bg-orange-500/20 text-orange-300 ring-1 ring-inset ring-orange-400/40"
+                                : "text-slate-200 hover:bg-white/10"
+                            }`}
+                          >
+                            {d.name}
+                          </button>
+                        ))}
+                      </div>
                     )}
 
                     {form.destinations.map((entry, index) => {
