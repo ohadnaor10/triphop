@@ -3,14 +3,14 @@ import turfBbox from "@turf/bbox";
 import turfUnion from "@turf/union";
 import { City, Country } from "country-state-city";
 import worldCountries from "world-countries";
-// Real (Natural Earth 1:10m, the highest precision world-atlas ships) country boundary
-// polygons, precomputed offline by scripts/build-country-boundaries.js — decoded from
-// TopoJSON, antimeridian-unwrapped, and stripped of far-flung overseas territories
-// ahead of time so this ships as a plain static GeoJSON file. The standard Mapbox
-// Geocoding API doesn't return real admin polygons (that requires the paid Mapbox
-// Boundaries tileset), so we ship real country geometry client-side instead — with zero
-// Mapbox calls and zero runtime topology processing needed to render one. Re-run the
-// build script (see its header comment) if world-atlas/world-countries are upgraded.
+// Real (Natural Earth 1:50m) country boundary polygons, precomputed offline by
+// scripts/build-country-boundaries.mjs — decoded from TopoJSON, antimeridian-unwrapped,
+// and stripped of far-flung overseas territories ahead of time so this ships as a plain
+// static GeoJSON file. The standard Mapbox Geocoding API doesn't return real admin
+// polygons (that requires the paid Mapbox Boundaries tileset), so we ship real country
+// geometry client-side instead — with zero Mapbox calls and zero runtime topology
+// processing needed to render one. Re-run the build script (see its header comment) if
+// world-atlas/world-countries are upgraded.
 import countryBoundariesData from "../data/countryBoundaries.json";
 
 export const REGIONS = [
@@ -99,11 +99,10 @@ for (const c of worldCountries) {
 // already-understood shapes.
 const KNOWN_WIDE_COUNTRIES = new Set(["RU", "CA", "US", "FJ", "KI", "NZ", "AQ"]);
 
-// Even world-atlas' highest-precision (1:10m) simplification distorts a micro-state's
-// coastline (relative to its real area) far more than a large country's — Monaco's
-// simplified polygon can easily be several times its real 2 km², purely from
-// simplification, not a wrong-feature bug. Below this size the area check is too noisy
-// to be useful, so skip it.
+// world-atlas' 1:50m simplification distorts a micro-state's coastline (relative to its
+// real area) far more than a large country's — Monaco's simplified polygon can easily
+// be 5x its real 2 km², purely from simplification, not a wrong-feature bug. Below this
+// size the area check is too noisy to be useful, so skip it.
 const MIN_AREA_FOR_RATIO_CHECK_KM2 = 50;
 
 // Dev-time guardrail: flag any country whose precomputed boundary (see
@@ -156,7 +155,7 @@ function getCountryBoundaries(): Map<string, GeoJSON.Feature<BoundaryGeometry>> 
   return countryBoundaries;
 }
 
-/** Real (Natural Earth 1:10m) administrative boundary polygon for a country, if known. */
+/** Real (Natural Earth 1:50m) administrative boundary polygon for a country, if known. */
 export function getCountryBoundary(isoCode: string): GeoJSON.Feature<BoundaryGeometry> | undefined {
   return getCountryBoundaries().get(isoCode);
 }
@@ -187,7 +186,7 @@ function getRegionBoundaries(): Map<Region, GeoJSON.Feature<BoundaryGeometry>> {
         const dissolved = turfUnion({ type: "FeatureCollection", features });
         if (dissolved) regionBoundaries.set(region, dissolved);
       } catch {
-        // A handful of simplified 1:10m polygons can be topologically invalid enough to
+        // A handful of simplified 1:50m polygons can be topologically invalid enough to
         // make union() throw — fall back to the pre-dissolve behavior (still real
         // geometry, just with member-country borders visible) rather than no shape at all.
         regionBoundaries.set(region, {

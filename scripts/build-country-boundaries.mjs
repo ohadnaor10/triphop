@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-// Precomputes real country boundary polygons — at Natural Earth's highest available
-// precision (1:10m, via the bundled `world-atlas` package, fully offline) — into a
-// static GeoJSON file checked into the repo. This replaces the old approach of
-// decoding+cleaning a lower-resolution (1:50m) topology at runtime on every cold
-// start: app/lib/geo.ts now just imports the output of this script directly, with
-// zero Mapbox API calls and zero runtime topology processing involved in rendering a
-// country polygon. Re-run with `node scripts/build-country-boundaries.mjs` if
+// Precomputes real country boundary polygons — Natural Earth 1:50m, via the bundled
+// `world-atlas` package, fully offline — into a static GeoJSON file checked into the
+// repo. This replaces the old approach of decoding+cleaning that topology at runtime on
+// every cold start: app/lib/geo.ts now just imports the output of this script directly,
+// with zero Mapbox API calls and zero runtime topology processing involved in rendering
+// a country polygon. Re-run with `node scripts/build-country-boundaries.mjs` if
 // world-atlas or world-countries are ever upgraded.
+//
+// world-atlas also ships a higher-precision 1:10m topology (swap the import below to
+// `world-atlas/countries-10m.json` to use it) — traded back down to 1:50m here to keep
+// the shipped GeoJSON file small (~3-4x smaller) at the cost of coastline detail.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -17,7 +20,7 @@ import { bbox as turfBbox } from "@turf/bbox";
 import { centroid as turfCentroid } from "@turf/centroid";
 import { distance as turfDistance } from "@turf/distance";
 import worldCountries from "world-countries";
-import countriesTopology from "world-atlas/countries-10m.json" with { type: "json" };
+import countriesTopology from "world-atlas/countries-50m.json" with { type: "json" };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUTPUT_PATH = path.join(__dirname, "..", "app", "data", "countryBoundaries.json");
