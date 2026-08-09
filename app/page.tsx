@@ -675,9 +675,9 @@ function HomePageContent() {
   }, [hasSearched, view]);
 
   // Restores the scroll position captured above: reloads pages until at least as many
-  // posts are back as were loaded before, then scrolls once. Runs at most once per
-  // mount (restoredScrollDoneRef), so it never fights the user's own scrolling
-  // afterward, and bails immediately if there's nothing to restore.
+  // posts are back as were loaded before, then scrolls. Runs at most once per mount
+  // (restoredScrollDoneRef), so it never fights the user's own scrolling afterward, and
+  // bails immediately if there's nothing to restore.
   const restoredScrollDoneRef = useRef(false);
   useEffect(() => {
     if (restoredScrollDoneRef.current) return;
@@ -691,7 +691,19 @@ function HomePageContent() {
       return;
     }
     restoredScrollDoneRef.current = true;
-    requestAnimationFrame(() => window.scrollTo(0, restoredFeedScroll.scrollY));
+    const targetY = restoredFeedScroll.scrollY;
+    // A single scrollTo() loses the race against whatever else settles right after the
+    // freshly-loaded cards land — avatar images finishing, the sticky header's layout,
+    // and (on this route) Next's own post-navigation scroll-to-top all land in this same
+    // window. Reasserting for a handful of frames outlasts all of that instead of
+    // guessing which one goes last.
+    let framesLeft = 10;
+    function reassertScroll() {
+      window.scrollTo(0, targetY);
+      framesLeft -= 1;
+      if (framesLeft > 0) requestAnimationFrame(reassertScroll);
+    }
+    requestAnimationFrame(reassertScroll);
   }, [restoredFeedScroll, hasSearched, view, loading, posts.length, hasMore, loadingMore, loadMore]);
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -1861,7 +1873,13 @@ function HomePageContent() {
               <p className="text-xs text-slate-500">Browse trips and reach out to plan together.</p>
             </div>
 
-            {posts.length === 0 && (
+            {loading && posts.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-sm text-slate-500">
+                Loading trips…
+              </div>
+            )}
+
+            {!loading && posts.length === 0 && (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-sm text-slate-500">
                 No trips match your filters yet.
               </div>
