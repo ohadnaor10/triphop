@@ -505,7 +505,11 @@ type StoredFeedState = {
   genderFilter: Gender | "All";
   ageMinFilter: string;
   ageMaxFilter: string;
-  showSavedOnly: boolean;
+  // Deliberately NOT persisted — unlike the other fields here, "saved only" has almost
+  // no visible on-screen indicator (a single icon's fill color) while its effect is
+  // severe (it hides nearly the whole feed). Carrying it silently across a navigation
+  // reads as "most of my posts disappeared" rather than "a filter is still on". It
+  // always starts off on a fresh mount, same as before this file gained persistence.
 };
 
 function readStoredFeedState(): StoredFeedState | null {
@@ -613,7 +617,7 @@ function HomePageContent() {
   const [viewUserId, setViewUserId] = useState<string | null>(null);
   const [isTripMapOpen, setIsTripMapOpen] = useState(false);
   const [tripMapPoints, setTripMapPoints] = useState<GeoPoint[]>([]);
-  const [showSavedOnly, setShowSavedOnly] = useState(restoredFeedState?.showSavedOnly ?? false);
+  const [showSavedOnly, setShowSavedOnly] = useState(false);
 
   // Referentially stable unless one of these state values actually changes (all are
   // useState values themselves, so this only produces a new object when a filter really
@@ -656,9 +660,8 @@ function HomePageContent() {
       genderFilter,
       ageMinFilter,
       ageMaxFilter,
-      showSavedOnly,
     });
-  }, [hasSearched, view, selectedDestinations, vibeFilter, appliedDateSearch, genderFilter, ageMinFilter, ageMaxFilter, showSavedOnly]);
+  }, [hasSearched, view, selectedDestinations, vibeFilter, appliedDateSearch, genderFilter, ageMinFilter, ageMaxFilter]);
 
   // Tracks how far into the feed the user has scrolled (and how many posts that took),
   // so the restore effect below can reload the same number of pages and land on the
