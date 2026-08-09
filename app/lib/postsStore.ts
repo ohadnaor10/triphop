@@ -32,6 +32,12 @@ export type PostsStore = {
   posts: Post[];
   savedPostIds: Set<string>;
   loading: boolean;
+  /** True while more posts exist beyond what's currently loaded. */
+  hasMore: boolean;
+  /** True while a loadMore() request is in flight. */
+  loadingMore: boolean;
+  /** Fetches the next page of older posts and appends them. No-op if already loading or hasMore is false. */
+  loadMore: () => Promise<void>;
   /** Returns an error message on failure, or null on success. */
   addPost: (input: PostInput) => Promise<string | null>;
   /** Returns an error message on failure, or null on success. */
@@ -41,6 +47,12 @@ export type PostsStore = {
   /** Contact number is never included in the public feed — fetched on demand, only for signed-in callers. */
   revealContact: (postId: string) => Promise<string | null>;
 };
+
+// Feed posts are paginated by created_at cursor rather than offset: offset pagination
+// shifts under newly-created posts (they land at the top, pushing the whole window down
+// a slot), which would skip or duplicate rows across pages. PAGE_SIZE is a compromise
+// between request count and per-request payload/render cost for a card-per-post feed.
+const PAGE_SIZE = 20;
 
 // SUPABASE_CONFIGURED is fixed for the lifetime of the build (an env var, not state),
 // so resolving which hook to use at module scope keeps each one's call order stable —
@@ -129,7 +141,19 @@ function useMockPostsStore(): PostsStore {
     [currentUser, posts],
   );
 
-  return { posts, savedPostIds, loading: false, addPost, editPost, removePost, toggleSaved, revealContact };
+  return {
+    posts,
+    savedPostIds,
+    loading: false,
+    hasMore: false,
+    loadingMore: false,
+    loadMore: useCallback(async () => {}, []),
+    addPost,
+    editPost,
+    removePost,
+    toggleSaved,
+    revealContact,
+  };
 }
 
 // ---------- Real store (Supabase-backed) ----------
@@ -189,6 +213,8 @@ function useSupabasePostsStore(): PostsStore {
   const [posts, setPosts] = useState<Post[]>([]);
   const [savedPostIds, setSavedPostIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Reset saves synchronously on logout (adjusting state during render, not in an
   // effect, per https://react.dev/learn/you-might-not-need-an-effect).
@@ -204,12 +230,15 @@ function useSupabasePostsStore(): PostsStore {
       .from("posts")
       .select(POST_SELECT)
       .order("created_at", { ascending: false })
+      .limit(PAGE_SIZE)
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error) {
           console.error("Failed to load posts:", error.message);
         } else if (data) {
-          setPosts((data as unknown as PostRow[]).map(rowToPost));
+          const rows = data as unknown as PostRow[];
+          setPosts(rows.map(rowToPost));
+          setHasMore(rows.length === PAGE_SIZE);
         }
         setLoading(false);
       });
@@ -217,6 +246,27 @@ function useSupabasePostsStore(): PostsStore {
       cancelled = true;
     };
   }, [supabase]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || posts.length === 0) return;
+    setLoadingMore(true);
+    const oldestLoadedCreatedAt = posts[posts.length - 1].createdAt;
+    const { data, error } = await supabase
+      .from("posts")
+      .select(POST_SELECT)
+      .order("created_at", { ascending: false })
+      .lt("created_at", oldestLoadedCreatedAt)
+      .limit(PAGE_SIZE);
+    if (error) {
+      console.error("Failed to load more posts:", error.message);
+      setLoadingMore(false);
+      return;
+    }
+    const rows = (data as unknown as PostRow[] | null) ?? [];
+    setPosts((prev) => [...prev, ...rows.map(rowToPost)]);
+    setHasMore(rows.length === PAGE_SIZE);
+    setLoadingMore(false);
+  }, [supabase, posts, hasMore, loadingMore]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -345,5 +395,17 @@ function useSupabasePostsStore(): PostsStore {
     [currentUser, supabase],
   );
 
-  return { posts, savedPostIds, loading, addPost, editPost, removePost, toggleSaved, revealContact };
+  return {
+    posts,
+    savedPostIds,
+    loading,
+    hasMore,
+    loadingMore,
+    loadMore,
+    addPost,
+    editPost,
+    removePost,
+    toggleSaved,
+    revealContact,
+  };
 }

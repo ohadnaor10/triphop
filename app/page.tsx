@@ -510,7 +510,8 @@ function HomePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = useClerkSupabaseClient();
-  const { posts, savedPostIds, addPost, editPost, removePost, toggleSaved, revealContact } = usePostsStore();
+  const { posts, savedPostIds, hasMore, loadingMore, loadMore, addPost, editPost, removePost, toggleSaved, revealContact } =
+    usePostsStore();
   const unreadMessageCount = useUnreadMessageCount();
   const [revealedContact, setRevealedContact] = useState<string | null>(null);
   const [view, setView] = useState<"feed" | "map">("feed");
@@ -789,6 +790,19 @@ function HomePageContent() {
     appliedDateSearch,
     geoWarmTick,
   ]);
+
+  // Fetches the next page of posts once the sentinel at the bottom of the feed list
+  // scrolls into view, instead of a manual "load more" click.
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel || view !== "feed") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) loadMore();
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [view, loadMore]);
 
   const viewPost = posts.find((p) => p.id === viewPostId) ?? null;
   const viewPostDestinationChips = useMemo(
@@ -1855,6 +1869,12 @@ function HomePageContent() {
                 <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-slate-600">{post.bio}</p>
               </div>
             ))}
+
+            {hasMore && (
+              <div ref={loadMoreSentinelRef} className="flex justify-center py-4 text-xs text-slate-400">
+                {loadingMore ? "Loading more trips…" : ""}
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-3">
