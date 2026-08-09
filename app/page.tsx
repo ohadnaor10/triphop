@@ -500,16 +500,16 @@ type StoredFeedState = {
   hasSearched: boolean;
   view: "feed" | "map";
   selectedDestinations: SearchDestination[];
-  vibeFilter: TripVibe | "All";
   appliedDateSearch: DateSearchUI | null;
-  genderFilter: Gender | "All";
-  ageMinFilter: string;
-  ageMaxFilter: string;
-  // Deliberately NOT persisted — unlike the other fields here, "saved only" has almost
-  // no visible on-screen indicator (a single icon's fill color) while its effect is
-  // severe (it hides nearly the whole feed). Carrying it silently across a navigation
-  // reads as "most of my posts disappeared" rather than "a filter is still on". It
-  // always starts off on a fresh mount, same as before this file gained persistence.
+  // vibeFilter, genderFilter, ageMin/MaxFilter, and showSavedOnly are deliberately NOT
+  // persisted here. Destination and dates are always visible in the search bar's two
+  // trigger boxes, so restoring them is unmistakable. The rest live behind the
+  // collapsed "More filters" panel with no always-visible indicator of their own — a
+  // narrow vibe/gender/age filter (or "saved only") silently surviving a navigation
+  // reads as "most of my posts disappeared" rather than "a filter is still on" (this
+  // bit a real user: three posts left, no filter visible, because vibeFilter had
+  // silently carried over as "Road Trip"). These always reset to their defaults on a
+  // fresh mount instead.
 };
 
 function readStoredFeedState(): StoredFeedState | null {
@@ -598,14 +598,14 @@ function HomePageContent() {
     restoredFeedState?.selectedDestinations ?? [],
   );
   const [destinationQuery, setDestinationQuery] = useState("");
-  const [vibeFilter, setVibeFilter] = useState<TripVibe | "All">(restoredFeedState?.vibeFilter ?? "All");
+  const [vibeFilter, setVibeFilter] = useState<TripVibe | "All">("All");
   const [appliedDateSearch, setAppliedDateSearch] = useState<DateSearchUI | null>(
     restoredFeedState?.appliedDateSearch ?? null,
   );
   const [dateSearchDraft, setDateSearchDraft] = useState<DateSearchUI>(EMPTY_DATE_SEARCH);
-  const [genderFilter, setGenderFilter] = useState<Gender | "All">(restoredFeedState?.genderFilter ?? "All");
-  const [ageMinFilter, setAgeMinFilter] = useState(restoredFeedState?.ageMinFilter ?? "");
-  const [ageMaxFilter, setAgeMaxFilter] = useState(restoredFeedState?.ageMaxFilter ?? "");
+  const [genderFilter, setGenderFilter] = useState<Gender | "All">("All");
+  const [ageMinFilter, setAgeMinFilter] = useState("");
+  const [ageMaxFilter, setAgeMaxFilter] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [postStep, setPostStep] = useState<0 | 1 | 2>(0);
   const [postDestQuery, setPostDestQuery] = useState("");
@@ -637,6 +637,12 @@ function HomePageContent() {
   const { posts, loading, savedPostIds, hasMore, loadingMore, loadMore, addPost, editPost, removePost, toggleSaved, revealContact } =
     usePostsStore(filters);
 
+  // Whether anything in the collapsed "More filters" panel is narrowing the feed —
+  // shown as a dot on its trigger, since none of these (unlike destination/dates) have
+  // any other on-screen indicator of their own once the panel is closed.
+  const hasMoreFiltersActive =
+    vibeFilter !== "All" || genderFilter !== "All" || ageMinFilter.trim() !== "" || ageMaxFilter.trim() !== "";
+
   const [openHeroField, setOpenHeroField] = useState<"destination" | "dates" | "filters" | null>(null);
   // Whether the user has performed their first search yet — gates the full-screen,
   // centered destination/dates prompt (see below) that replaces the feed on first run,
@@ -650,18 +656,11 @@ function HomePageContent() {
 
   // Persist the hero/feed search whenever it meaningfully changes, so a later mount
   // (after visiting /profile or /messages) can resume it via restoredFeedState above.
+  // Only the fields with an always-visible on-screen representation — see
+  // StoredFeedState above for why vibe/gender/age/savedOnly are excluded.
   useEffect(() => {
-    writeStoredFeedState({
-      hasSearched,
-      view,
-      selectedDestinations,
-      vibeFilter,
-      appliedDateSearch,
-      genderFilter,
-      ageMinFilter,
-      ageMaxFilter,
-    });
-  }, [hasSearched, view, selectedDestinations, vibeFilter, appliedDateSearch, genderFilter, ageMinFilter, ageMaxFilter]);
+    writeStoredFeedState({ hasSearched, view, selectedDestinations, appliedDateSearch });
+  }, [hasSearched, view, selectedDestinations, appliedDateSearch]);
 
   // Tracks how far into the feed the user has scrolled (and how many posts that took),
   // so the restore effect below can reload the same number of pages and land on the
@@ -1653,14 +1652,17 @@ function HomePageContent() {
               <button
                 type="button"
                 onClick={() => setOpenHeroField(openHeroField === "filters" ? null : "filters")}
-                aria-label="More filters"
-                className={`flex shrink-0 items-center justify-center rounded-2xl border px-3 transition ${
+                aria-label={hasMoreFiltersActive ? "More filters (active)" : "More filters"}
+                className={`relative flex shrink-0 items-center justify-center rounded-2xl border px-3 transition ${
                   openHeroField === "filters"
                     ? "border-orange-300 bg-orange-50 text-orange-600"
                     : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                 }`}
               >
                 <IconSliders className="h-4 w-4" />
+                {hasMoreFiltersActive && (
+                  <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-orange-500 ring-2 ring-white" />
+                )}
               </button>
             </div>
 
