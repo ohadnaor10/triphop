@@ -643,6 +643,21 @@ function HomePageContent() {
   const hasMoreFiltersActive =
     vibeFilter !== "All" || genderFilter !== "All" || ageMinFilter.trim() !== "" || ageMaxFilter.trim() !== "";
 
+  // Measures the hero's destination row so its dropdown panel (see renderDestinationPanel's
+  // topOffsetPx) can be positioned directly beneath it instead of below the whole stacked
+  // destination+dates box. A ResizeObserver rather than a one-off measurement — the row's
+  // height can change (e.g. destination text wrapping differently) without the component
+  // re-rendering for an unrelated reason.
+  const [heroDestinationRowHeight, setHeroDestinationRowHeight] = useState(0);
+  const heroDestinationRowObserverRef = useRef<ResizeObserver | null>(null);
+  const heroDestinationRowRef = useCallback((node: HTMLDivElement | null) => {
+    heroDestinationRowObserverRef.current?.disconnect();
+    if (!node) return;
+    const observer = new ResizeObserver((entries) => setHeroDestinationRowHeight(entries[0].contentRect.height));
+    observer.observe(node);
+    heroDestinationRowObserverRef.current = observer;
+  }, []);
+
   const [openHeroField, setOpenHeroField] = useState<"destination" | "dates" | "filters" | null>(null);
   // Whether the user has performed their first search yet — gates the full-screen,
   // centered destination/dates prompt (see below) that replaces the feed on first run,
@@ -1013,14 +1028,21 @@ function HomePageContent() {
 
   const destinationResults = useMemo(() => {
     const q = destinationQuery.trim().toLowerCase();
+    // Nothing until the user actually types — an alphabetical wall of every country on
+    // earth isn't a useful starting point. Prefix match rather than substring, so "un"
+    // surfaces "United Arab Emirates" but not "Brunei" or "Hungary" (both merely contain
+    // "un") — a search-as-you-type list should read top-to-bottom as "starts with what I
+    // typed," not "contains it anywhere."
+    if (q === "") return { countries: [], regions: [], cities: [], places: [] };
     const countries: SearchDestination[] = getAllCountries()
-      .filter((c) => q === "" || c.name.toLowerCase().includes(q))
+      .filter((c) => c.name.toLowerCase().startsWith(q))
       .slice(0, 8)
       .map((c) => ({ type: "country" as const, code: c.isoCode, name: c.name }));
-    const regions: SearchDestination[] = REGIONS.filter(
-      (r) => q === "" || r.toLowerCase().includes(q),
-    ).map((r) => ({ type: "region" as const, name: r }));
-    const cities = allPostCities.filter((c) => q === "" || c.name.toLowerCase().includes(q)).slice(0, 8);
+    const regions: SearchDestination[] = REGIONS.filter((r) => r.toLowerCase().startsWith(q)).map((r) => ({
+      type: "region" as const,
+      name: r,
+    }));
+    const cities = allPostCities.filter((c) => c.name.toLowerCase().startsWith(q)).slice(0, 8);
     // Drop Mapbox suggestions that duplicate a country/city/region already surfaced locally.
     const knownNames = new Set(
       [...countries, ...regions, ...cities].map((d) => d.name.toLowerCase()),
@@ -1311,10 +1333,22 @@ function HomePageContent() {
     );
   }
 
-  function renderDestinationPanel() {
+  // topOffsetPx: pixel offset from the panel's positioning container, used by the hero
+  // (first-run) search where destination/dates stack vertically — without it, the panel
+  // would sit below the *entire* stacked trigger box (i.e. below the dates row too)
+  // instead of directly under the destination row it belongs to. The header search's
+  // destination/dates triggers sit side by side instead, where the panel's default
+  // flow position (right after the whole trigger row) is already correct, so it's
+  // omitted there.
+  function renderDestinationPanel(topOffsetPx?: number) {
     if (openHeroField !== "destination") return null;
     return (
-      <div className="absolute inset-x-4 z-50 mt-2 max-h-80 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
+      <div
+        className={`absolute inset-x-4 z-50 max-h-80 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-lg ${
+          topOffsetPx === undefined ? "mt-2" : ""
+        }`}
+        style={topOffsetPx === undefined ? undefined : { top: topOffsetPx + 8 }}
+      >
         {selectedDestinations.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {selectedDestinations.map((d) => (
@@ -1355,9 +1389,12 @@ function HomePageContent() {
         {destinationResults.countries.length === 0 &&
           destinationResults.regions.length === 0 &&
           destinationResults.cities.length === 0 &&
-          destinationResults.places.length === 0 && (
+          destinationResults.places.length === 0 &&
+          (destinationQuery.trim() === "" ? (
+            <p className="px-2 py-2 text-xs text-slate-400">Start typing to search.</p>
+          ) : (
             <p className="px-2 py-2 text-xs text-slate-400">No matches found</p>
-          )}
+          ))}
 
         {(
           [
@@ -1392,16 +1429,25 @@ function HomePageContent() {
             ),
         )}
 
-        <button
-          type="button"
-          onClick={() => {
-            setHasSearched(true);
-            setOpenHeroField(null);
-          }}
-          className="mt-2 w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition active:scale-[0.98]"
-        >
-          Done
-        </button>
+        <div className="mt-2 flex items-center gap-2 border-t border-slate-100 pt-2">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedDestinations([]);
+              setOpenHeroField(null);
+            }}
+            className="flex-1 rounded-xl bg-slate-100 py-2 text-xs font-semibold text-slate-700 transition active:bg-slate-200"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpenHeroField(null)}
+            className="flex-1 rounded-xl bg-orange-500 py-2 text-xs font-semibold text-white transition active:scale-[0.98] active:bg-orange-600"
+          >
+            Apply
+          </button>
+        </div>
       </div>
     );
   }
@@ -1441,7 +1487,6 @@ function HomePageContent() {
                 setDateSearchDraft(next);
                 if (range.startDate && range.endDate) {
                   setAppliedDateSearch(next);
-                  setHasSearched(true);
                   setOpenHeroField(null);
                 }
               }}
@@ -1468,7 +1513,6 @@ function HomePageContent() {
             onClick={() => {
               setDateSearchDraft(EMPTY_DATE_SEARCH);
               setAppliedDateSearch(null);
-              setHasSearched(true);
               setOpenHeroField(null);
             }}
             className="flex-1 rounded-xl bg-slate-100 py-2 text-xs font-semibold text-slate-700 transition active:bg-slate-200"
@@ -1483,7 +1527,6 @@ function HomePageContent() {
                   ? Boolean(dateSearchDraft.startDate && dateSearchDraft.endDate)
                   : dateSearchDraft.months.length > 0;
               setAppliedDateSearch(hasContent ? dateSearchDraft : null);
-              setHasSearched(true);
               setOpenHeroField(null);
             }}
             className="flex-1 rounded-xl bg-orange-500 py-2 text-xs font-semibold text-white transition active:scale-[0.98] active:bg-orange-600"
@@ -1812,11 +1855,13 @@ function HomePageContent() {
 
             <div ref={heroRef} className="relative w-full max-w-sm">
               <div className="flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md">
-                {renderDestinationTrigger("lg")}
+                <div ref={heroDestinationRowRef} className="contents">
+                  {renderDestinationTrigger("lg")}
+                </div>
                 {renderDatesTrigger("lg")}
               </div>
 
-              {renderDestinationPanel()}
+              {renderDestinationPanel(heroDestinationRowHeight)}
               {renderDatesPanel()}
             </div>
 
