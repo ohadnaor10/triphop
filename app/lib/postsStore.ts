@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { INITIAL_POSTS } from "../data/mockPosts";
 import type { Destination, FocusedDestination, Gender, Post, SearchDestination, TripDate, TripVibe } from "../page";
@@ -273,7 +273,15 @@ function rowToPost(row: SearchPostsRow): Post {
   };
 }
 
-type SearchCursor = { score: number | null; createdAt: string };
+// id is a required tiebreaker, not cosmetic: multiple posts can share the exact same
+// created_at (bulk-inserted rows, e.g. seed data), and created_at-only cursors silently
+// drop every row sharing that value once the cursor lands on it — see
+// supabase/migrations/0014_search_posts_id_tiebreak.sql.
+type SearchCursor = { score: number | null; createdAt: string; id: string };
+
+function cursorOf(row: SearchPostsRow): SearchCursor {
+  return { score: row.relevance_score, createdAt: row.created_at, id: row.id };
+}
 
 function useSupabasePostsStore(filters: PostsFilters): PostsStore {
   const { currentUser } = useAuth();
@@ -284,6 +292,13 @@ function useSupabasePostsStore(filters: PostsFilters): PostsStore {
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<SearchCursor | null>(null);
+
+  // Bumped by both refresh() and loadMore() so whichever of them is the most recently
+  // *started* request wins — otherwise a stale refresh() (e.g. the redundant one-time
+  // refetch that fires when Clerk's session resolves and the Supabase client gets a new
+  // identity, pre-existing behavior unrelated to pagination) can resolve after a
+  // loadMore() and clobber its appended page with a fresh, shorter page-1-only list.
+  const requestIdRef = useRef(0);
 
   // Reset saves synchronously on logout (adjusting state during render, not in an
   // effect, per https://react.dev/learn/you-might-not-need-an-effect).
@@ -312,8 +327,10 @@ function useSupabasePostsStore(filters: PostsFilters): PostsStore {
   );
 
   const refresh = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     const { data, error } = await supabase.rpc("search_posts", { ...rpcParams, p_limit: PAGE_SIZE });
+    if (requestId !== requestIdRef.current) return; // superseded by a newer refresh/loadMore
     if (error) {
       console.error("Failed to search posts:", error.message);
       setLoading(false);
@@ -322,7 +339,7 @@ function useSupabasePostsStore(filters: PostsFilters): PostsStore {
     const rows = (data as SearchPostsRow[] | null) ?? [];
     setPosts(rows.map(rowToPost));
     setHasMore(rows.length === PAGE_SIZE);
-    setCursor(rows.length > 0 ? { score: rows[rows.length - 1].relevance_score, createdAt: rows[rows.length - 1].created_at } : null);
+    setCursor(rows.length > 0 ? cursorOf(rows[rows.length - 1]) : null);
     setLoading(false);
   }, [supabase, rpcParams]);
 
@@ -337,13 +354,16 @@ function useSupabasePostsStore(filters: PostsFilters): PostsStore {
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || !cursor) return;
+    const requestId = ++requestIdRef.current;
     setLoadingMore(true);
     const { data, error } = await supabase.rpc("search_posts", {
       ...rpcParams,
       p_cursor_score: cursor.score,
       p_cursor_created_at: cursor.createdAt,
+      p_cursor_id: cursor.id,
       p_limit: PAGE_SIZE,
     });
+    if (requestId !== requestIdRef.current) return; // superseded by a newer refresh/loadMore
     if (error) {
       console.error("Failed to load more posts:", error.message);
       setLoadingMore(false);
@@ -353,7 +373,7 @@ function useSupabasePostsStore(filters: PostsFilters): PostsStore {
     setPosts((prev) => [...prev, ...rows.map(rowToPost)]);
     setHasMore(rows.length === PAGE_SIZE);
     if (rows.length > 0) {
-      setCursor({ score: rows[rows.length - 1].relevance_score, createdAt: rows[rows.length - 1].created_at });
+      setCursor(cursorOf(rows[rows.length - 1]));
     }
     setLoadingMore(false);
   }, [supabase, rpcParams, cursor, hasMore, loadingMore]);

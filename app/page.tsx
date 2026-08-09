@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState, type SubmitEvent } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type SubmitEvent } from "react";
 import { flushSync } from "react-dom";
 import {
   IconCalendar,
@@ -739,16 +739,28 @@ function HomePageContent() {
 
   // Fetches the next page of posts once the sentinel at the bottom of the feed list
   // scrolls into view, instead of a manual "load more" click.
-  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  // A callback ref rather than a plain useRef+useEffect pair: the sentinel div only
+  // exists in the DOM while hasMore is true AND the user has actually reached the feed
+  // (it's conditionally rendered, gated behind view === "feed" further down) — neither
+  // of which necessarily changes the *effect's own* dependencies (view, loadMore) at the
+  // moment the div actually mounts (e.g. the hero-screen-to-feed transition is driven by
+  // a separate hasSearched flag). A plain effect can end up creating its observer before
+  // the div exists and then never re-running once it does. A callback ref instead fires
+  // exactly when React attaches/detaches the node, so the observer is always created
+  // against a real element.
+  const loadMoreObserverRef = useRef<IntersectionObserver | null>(null);
+  const loadMoreRef = useRef(loadMore);
   useEffect(() => {
-    const sentinel = loadMoreSentinelRef.current;
-    if (!sentinel || view !== "feed") return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) loadMore();
+    loadMoreRef.current = loadMore;
+  }, [loadMore]);
+  const loadMoreSentinelRef = useCallback((node: HTMLDivElement | null) => {
+    loadMoreObserverRef.current?.disconnect();
+    if (!node) return;
+    loadMoreObserverRef.current = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) loadMoreRef.current();
     });
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [view, loadMore]);
+    loadMoreObserverRef.current.observe(node);
+  }, []);
 
   const viewPost = posts.find((p) => p.id === viewPostId) ?? null;
   const viewPostDestinationChips = useMemo(
