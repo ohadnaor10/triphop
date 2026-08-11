@@ -677,6 +677,18 @@ function HomePageContent() {
     writeStoredFeedState({ hasSearched, view, selectedDestinations, appliedDateSearch });
   }, [hasSearched, view, selectedDestinations, appliedDateSearch]);
 
+  // The hero is a fixed, app-like screen: everything fits, so the page itself must not
+  // scroll (rubber-banding there just detaches the search card from the wordmark). The
+  // feed, once searched, scrolls normally again.
+  useEffect(() => {
+    if (hasSearched) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [hasSearched]);
+
   // Tracks how far into the feed the user has scrolled (and how many posts that took),
   // so the restore effect below can reload the same number of pages and land on the
   // same spot. A ref rather than a `posts.length` effect dependency — this only needs
@@ -1454,6 +1466,64 @@ function HomePageContent() {
     );
   }
 
+  // Avatar + [My Profile, Log out] dropdown. Shared by the feed header and the hero, so
+  // tapping the avatar behaves identically on both surfaces (the hero used to jump
+  // straight to /profile). Only one of the two is mounted at a time (hasSearched), so
+  // they can safely share showProfileMenu / profileMenuRef.
+  function renderProfileMenu(size: "sm" | "lg") {
+    if (!currentUser) return null;
+    const avatarSize = size === "lg" ? "h-10 w-10 text-sm" : "h-9 w-9 text-xs";
+    return (
+      <div ref={profileMenuRef} className="relative">
+        <button
+          type="button"
+          aria-label="Profile"
+          aria-haspopup="menu"
+          aria-expanded={showProfileMenu}
+          onClick={() => setShowProfileMenu((v) => !v)}
+          className={`flex items-center justify-center overflow-hidden rounded-full bg-slate-100 font-bold text-slate-600 transition active:scale-95 active:bg-slate-200 ${avatarSize}`}
+        >
+          <Avatar url={currentUser.avatarUrl} initials={currentUser.avatar} className={avatarSize} />
+        </button>
+
+        {showProfileMenu && (
+          <div
+            role="menu"
+            className="absolute right-0 z-50 mt-2 w-48 overflow-hidden rounded-2xl border border-slate-200 bg-white py-1 text-left shadow-lg"
+          >
+            <div className="border-b border-slate-100 px-3 py-2">
+              <p className="truncate text-sm font-semibold text-slate-900">{currentUser.name}</p>
+            </div>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setShowProfileMenu(false);
+                router.push("/profile");
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
+            >
+              <IconUser className="h-4 w-4 text-slate-400" />
+              My Profile
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                logout();
+                setShowProfileMenu(false);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 transition hover:bg-rose-50"
+            >
+              <IconLogOut className="h-4 w-4" />
+              Log out
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function renderDatesPanel() {
     if (openHeroField !== "dates") return null;
     return (
@@ -1479,9 +1549,10 @@ function HomePageContent() {
           </button>
         </div>
 
-        <div className="max-h-72 overflow-y-auto p-3">
+        <div className="overflow-hidden p-3">
           {dateSearchDraft.mode === "specific" ? (
             <CalendarRangePicker
+              months={1}
               startDate={dateSearchDraft.startDate}
               endDate={dateSearchDraft.endDate}
               onChange={(range) => {
@@ -1635,55 +1706,7 @@ function HomePageContent() {
                   </button>
                 </div>
               )}
-              {currentUser && (
-                <div ref={profileMenuRef} className="relative">
-                  <button
-                    type="button"
-                    aria-label="Profile"
-                    aria-haspopup="menu"
-                    aria-expanded={showProfileMenu}
-                    onClick={() => setShowProfileMenu((v) => !v)}
-                    className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-xs font-bold text-slate-600 transition active:scale-95 active:bg-slate-200"
-                  >
-                    <Avatar url={currentUser.avatarUrl} initials={currentUser.avatar} className="h-9 w-9 text-xs" />
-                  </button>
-
-                  {showProfileMenu && (
-                    <div
-                      role="menu"
-                      className="absolute right-0 z-50 mt-2 w-48 overflow-hidden rounded-2xl border border-slate-200 bg-white py-1 shadow-lg"
-                    >
-                      <div className="border-b border-slate-100 px-3 py-2">
-                        <p className="truncate text-sm font-semibold text-slate-900">{currentUser.name}</p>
-                      </div>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setShowProfileMenu(false);
-                          router.push("/profile");
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
-                      >
-                        <IconUser className="h-4 w-4 text-slate-400" />
-                        My Profile
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          logout();
-                          setShowProfileMenu(false);
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 transition hover:bg-rose-50"
-                      >
-                        <IconLogOut className="h-4 w-4" />
-                        Log out
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
+              {renderProfileMenu("sm")}
             </div>
           </div>
 
@@ -1814,14 +1837,7 @@ function HomePageContent() {
           <div className="relative flex min-h-[70vh] flex-col items-center justify-center gap-6 text-center">
             <div className="absolute inset-x-0 top-0 flex items-center justify-end gap-2">
               {currentUser ? (
-                <button
-                  type="button"
-                  onClick={() => router.push("/profile")}
-                  aria-label="My profile"
-                  className="overflow-hidden rounded-full transition active:scale-95"
-                >
-                  <Avatar url={currentUser.avatarUrl} initials={currentUser.avatar} className="h-10 w-10 text-sm" />
-                </button>
+                renderProfileMenu("lg")
               ) : (
                 <>
                   <button

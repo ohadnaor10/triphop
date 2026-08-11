@@ -30,9 +30,12 @@ export default function MonthCarousel({ months, selected, onToggle, formatMonth,
   if (months.length === 0) return null;
 
   return (
+    // No 50%-width side padding on the scroller: that let the strip scroll far past the
+    // first/last pill into empty space. With plain padding the scroll range ends exactly
+    // on the edge pills, and overscroll-x-contain stops the gesture bleeding to the page.
     <div
       ref={scrollerRef}
-      className="flex snap-x snap-mandatory gap-3 overflow-x-auto px-[calc(50%-3rem)] py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {months.map((month) => {
         const isSelected = selected.includes(month);

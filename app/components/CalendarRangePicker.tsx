@@ -7,6 +7,9 @@ type CalendarRangePickerProps = {
   startDate: string;
   endDate: string;
   onChange: (range: { startDate: string; endDate: string }) => void;
+  /** How many consecutive months to render side by side. 1 keeps the panel short enough
+      to fit a phone screen without scrolling; the wizard still uses the 2-month view. */
+  months?: 1 | 2;
 };
 
 export function MonthGrid({
@@ -66,7 +69,7 @@ export function MonthGrid({
   );
 }
 
-export default function CalendarRangePicker({ startDate, endDate, onChange }: CalendarRangePickerProps) {
+export default function CalendarRangePicker({ startDate, endDate, onChange, months = 2 }: CalendarRangePickerProps) {
   const now = new Date();
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
@@ -116,15 +119,17 @@ export default function CalendarRangePicker({ startDate, endDate, onChange }: Ca
           ›
         </button>
       </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className={`grid grid-cols-1 gap-4 ${months === 2 ? "sm:grid-cols-2" : ""}`}>
         <MonthGrid year={viewYear} month={viewMonth} startDate={startDate} endDate={endDate} onPick={handlePick} />
-        <MonthGrid
-          year={second.getFullYear()}
-          month={second.getMonth()}
-          startDate={startDate}
-          endDate={endDate}
-          onPick={handlePick}
-        />
+        {months === 2 && (
+          <MonthGrid
+            year={second.getFullYear()}
+            month={second.getMonth()}
+            startDate={startDate}
+            endDate={endDate}
+            onPick={handlePick}
+          />
+        )}
       </div>
     </div>
   );
