@@ -1,13 +1,11 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type SubmitEvent } from "react";
 import { flushSync } from "react-dom";
 import {
   IconCalendar,
   IconChevronLeft,
-  IconEdit,
   IconGlobe,
   IconGrid,
   IconHeart,
@@ -17,17 +15,16 @@ import {
   IconPlus,
   IconSearch,
   IconSliders,
-  IconTrash,
   IconWhatsApp,
-  IconX,
 } from "./components/icons";
 import type { FeedMapPoint, FeedMapPost } from "./components/TripMap";
-import Avatar from "./components/Avatar";
 import Combobox from "./components/Combobox";
 import CreatePostModal from "./components/CreatePostModal";
 import DateSearchFields from "./components/DateSearchFields";
 import DatesPanel from "./components/DatesPanel";
 import DestinationPanel from "./components/DestinationPanel";
+import { FeedList } from "./components/FeedList";
+import { FeedMapView } from "./components/FeedMapView";
 import { PostDetailView, UserProfileOverlay } from "./components/PostDetailView";
 import ProfileMenu from "./components/ProfileMenu";
 import { getPopularDestinations } from "./data/popularDestinations";
@@ -46,20 +43,6 @@ import { useAuth } from "./context/AuthContext";
 import { useUnreadMessageCount } from "./lib/messagesStore";
 import { usePostsStore, type PostsFilters } from "./lib/postsStore";
 import { useClerkSupabaseClient } from "./lib/supabase/useClerkSupabaseClient";
-
-const TripMap = dynamic(() => import("./components/TripMap"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex h-full items-center justify-center text-sm text-slate-400">Loading map…</div>
-  ),
-});
-
-const TripDestinationsMap = dynamic(() => import("./components/TripDestinationsMap"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex h-full items-center justify-center text-sm text-slate-400">Loading map…</div>
-  ),
-});
 
 // ---------- Domain types ----------
 
@@ -1682,210 +1665,37 @@ function HomePageContent() {
             </button>
           </div>
         ) : view === "feed" ? (
-          <div className="flex flex-col gap-4">
-            <div className="px-1">
-              <h1 className="text-lg font-bold text-slate-900">Trips looking for a travel partner</h1>
-              <p className="text-xs text-slate-500">Browse trips and reach out to plan together.</p>
-            </div>
-
-            {loading && posts.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-sm text-slate-500">
-                Loading trips…
-              </div>
-            )}
-
-            {!loading && posts.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-sm text-slate-500">
-                No trips match your filters yet.
-              </div>
-            )}
-
-            {posts.map((post) => (
-              <div
-                key={post.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => setViewPostId(post.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setViewPostId(post.id);
-                  }
-                }}
-                className="relative overflow-hidden rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-200 transition hover:shadow-md active:scale-[0.99]"
-              >
-                <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5">
-                  {currentUser && post.userId === currentUser.id && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startEditPost(post);
-                        }}
-                        aria-label="Edit trip"
-                        className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-slate-400 ring-1 ring-slate-200 transition hover:text-slate-700 active:scale-90"
-                      >
-                        <IconEdit className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (window.confirm("Delete this trip post?")) deletePost(post.id);
-                        }}
-                        aria-label="Delete trip"
-                        className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-slate-400 ring-1 ring-slate-200 transition hover:text-rose-600 active:scale-90"
-                      >
-                        <IconTrash className="h-4 w-4" />
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleSavedPost(post.id);
-                    }}
-                    aria-label={savedPostIds.has(post.id) ? "Remove from saved" : "Save trip"}
-                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-90 ${
-                      savedPostIds.has(post.id)
-                        ? "bg-rose-500 text-white"
-                        : "bg-white/90 text-slate-400 ring-1 ring-slate-200 hover:text-rose-500"
-                    }`}
-                  >
-                    <IconHeart className="h-4 w-4" filled={savedPostIds.has(post.id)} />
-                  </button>
-                </div>
-
-                {/* 1. Destination — primary header */}
-                <div
-                  className={`flex min-w-0 items-start gap-1.5 ${
-                    currentUser && post.userId === currentUser.id ? "pr-28" : "pr-9"
-                  }`}
-                >
-                  <IconMapPin className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
-                  <h3 className="min-w-0 truncate text-lg font-bold leading-snug text-slate-900">
-                    {getDestinationLabel(post.destinations)}
-                  </h3>
-                </div>
-
-                {/* 2. Dates / timing — secondary header */}
-                <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-[22px] text-sm font-medium text-slate-600">
-                  <IconCalendar className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                  <span className="truncate">{getDateLabel(post.date, true)}</span>
-                </div>
-
-                {/* 3. User info */}
-                <button
-                  type="button"
-                  onClick={(e) => goToUserProfile(post.userId, e)}
-                  className="mt-3 flex items-center gap-2.5 text-left transition active:opacity-70"
-                >
-                  <Avatar
-                    url={post.user.avatarUrl}
-                    initials={initials(post.user.name)}
-                    colorClass={post.user.avatarColor}
-                    className="h-9 w-9 text-xs"
-                  />
-                  <p className="truncate text-sm text-slate-700">
-                    <span className="font-semibold text-slate-900">{post.user.name}</span>
-                    {" · "}
-                    {post.user.age}
-                    {" · "}
-                    {formatGender(post.user.gender)}
-                  </p>
-                </button>
-
-                {/* 4. Style / vibe tags */}
-                <div className="mt-3 flex flex-nowrap gap-1.5 overflow-hidden">
-                  {post.vibes.map((vibe) => (
-                    <span
-                      key={vibe}
-                      className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${VIBE_STYLES[vibe]}`}
-                    >
-                      {vibe}
-                    </span>
-                  ))}
-                </div>
-
-                {/* 5. Description */}
-                <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-slate-600">{post.bio}</p>
-              </div>
-            ))}
-
-            {hasMore && (
-              <div ref={loadMoreSentinelRef} className="flex justify-center py-4 text-xs text-slate-400">
-                {loadingMore ? "Loading more trips…" : ""}
-              </div>
-            )}
-          </div>
+          <FeedList
+            posts={posts}
+            loading={loading}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            loadMoreSentinelRef={loadMoreSentinelRef}
+            currentUser={currentUser}
+            savedPostIds={savedPostIds}
+            toggleSavedPost={toggleSavedPost}
+            startEditPost={startEditPost}
+            deletePost={deletePost}
+            setViewPostId={setViewPostId}
+            goToUserProfile={goToUserProfile}
+            vibeStyles={VIBE_STYLES}
+            initials={initials}
+            formatGender={formatGender}
+            getDateLabel={getDateLabel}
+            getDestinationLabel={getDestinationLabel}
+          />
         ) : (
-          <div className="flex flex-col gap-3">
-            <div className="px-1">
-              <h1 className="text-lg font-bold text-slate-900">Where trips are happening</h1>
-              <p className="text-xs text-slate-500">Tap a pin to see who&apos;s heading there.</p>
-            </div>
-
-            <div className="relative h-[420px] overflow-hidden rounded-2xl border border-slate-200">
-              <TripMap
-                posts={mapMarkers}
-                focusedPostId={activeFocusedMapPostId}
-                onSelectPost={(id) => setFocusedMapPostId(id)}
-              />
-
-              {focusedMapPost && (
-                <div className="pointer-events-none absolute inset-x-3 top-3 z-10">
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setViewPostId(focusedMapPost.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setViewPostId(focusedMapPost.id);
-                      }
-                    }}
-                    className="pointer-events-auto flex items-center gap-3 rounded-2xl bg-white p-3 shadow-lg ring-1 ring-slate-200 transition active:scale-[0.99]"
-                  >
-                    <button
-                      type="button"
-                      onClick={(e) => goToUserProfile(focusedMapPost.userId, e)}
-                      aria-label={`View ${focusedMapPost.user.name}'s profile`}
-                      className="shrink-0 rounded-full transition active:scale-95"
-                    >
-                      <Avatar
-                        url={focusedMapPost.user.avatarUrl}
-                        initials={initials(focusedMapPost.user.name)}
-                        colorClass={focusedMapPost.user.avatarColor}
-                        className="h-10 w-10 text-xs"
-                      />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold text-slate-900">
-                        {getDestinationLabel(focusedMapPost.destinations)}
-                      </p>
-                      <p className="truncate text-xs text-slate-500">{getDateLabel(focusedMapPost.date, true)}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setFocusedMapPostId(null);
-                      }}
-                      aria-label="Close preview"
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition active:bg-slate-200"
-                    >
-                      <IconX className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-            <p className="px-1 text-center text-xs text-slate-400">
-              Tap a pin to preview that trip and message on WhatsApp.
-            </p>
-          </div>
+          <FeedMapView
+            mapMarkers={mapMarkers}
+            activeFocusedMapPostId={activeFocusedMapPostId}
+            setFocusedMapPostId={setFocusedMapPostId}
+            focusedMapPost={focusedMapPost}
+            setViewPostId={setViewPostId}
+            goToUserProfile={goToUserProfile}
+            initials={initials}
+            getDateLabel={getDateLabel}
+            getDestinationLabel={getDestinationLabel}
+          />
         )}
       </main>
 
