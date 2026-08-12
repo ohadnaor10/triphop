@@ -3,30 +3,16 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type SubmitEvent } from "react";
 import { flushSync } from "react-dom";
-import {
-  IconCalendar,
-  IconChevronLeft,
-  IconGlobe,
-  IconGrid,
-  IconHeart,
-  IconMap,
-  IconMapPin,
-  IconMessageCircle,
-  IconPlus,
-  IconSearch,
-  IconSliders,
-  IconWhatsApp,
-} from "./components/icons";
+import { IconPlus } from "./components/icons";
 import type { FeedMapPoint, FeedMapPost } from "./components/TripMap";
 import Combobox from "./components/Combobox";
 import CreatePostModal from "./components/CreatePostModal";
 import DateSearchFields from "./components/DateSearchFields";
-import DatesPanel from "./components/DatesPanel";
-import DestinationPanel from "./components/DestinationPanel";
 import { FeedList } from "./components/FeedList";
 import { FeedMapView } from "./components/FeedMapView";
+import HeroSearch from "./components/HeroSearch";
 import { PostDetailView, UserProfileOverlay } from "./components/PostDetailView";
-import ProfileMenu from "./components/ProfileMenu";
+import TopNavBar from "./components/TopNavBar";
 import { getPopularDestinations } from "./data/popularDestinations";
 import {
   geocodePlace,
@@ -1257,413 +1243,104 @@ function HomePageContent() {
     });
   }
 
-  // Destination/dates trigger buttons + their dropdown panels are shared between the
-  // compact sticky-header search bar (shown once the user has searched) and the large,
-  // centered first-run prompt (shown before that) — same behavior, different sizing, so
-  // the two surfaces can't drift apart. Plain functions (not components) so calling them
-  // inline doesn't remount the DOM/reset focus on every render.
-  function renderDestinationTrigger(size: "sm" | "lg") {
-    const hasSelection = selectedDestinations.length > 0;
-    return (
-      <div
-        className={`flex min-w-0 flex-1 items-center transition ${
-          size === "lg" ? "border-b border-slate-100 sm:border-b-0 sm:border-r" : "border-r border-slate-100"
-        } ${openHeroField === "destination" ? "bg-orange-50" : "bg-white hover:bg-slate-50"}`}
-      >
-        <button
-          type="button"
-          onClick={() => setOpenHeroField(openHeroField === "destination" ? null : "destination")}
-          className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left ${
-            size === "lg" ? "px-4 py-4" : "px-3 py-2.5"
-          }`}
-        >
-          <span
-            className={`flex items-center gap-1 font-semibold uppercase tracking-wide text-slate-400 ${size === "lg" ? "text-xs" : "text-[10px]"}`}
-          >
-            <IconMapPin className={size === "lg" ? "h-3.5 w-3.5" : "h-3 w-3"} />
-            Destination
-          </span>
-          <span className={`w-full truncate font-semibold text-slate-900 ${size === "lg" ? "text-base" : "text-sm"}`}>
-            {hasSelection ? selectedDestinations.map((d) => d.name).join(" + ") : "Anywhere"}
-          </span>
-        </button>
-
-        {hasSelection && (
-          <button
-            type="button"
-            onClick={() => setOpenHeroField("destination")}
-            aria-label="Choose more destinations"
-            className={`mr-2 flex shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 active:scale-90 ${
-              size === "lg" ? "h-7 w-7" : "h-6 w-6"
-            }`}
-          >
-            <IconPlus className={size === "lg" ? "h-4 w-4" : "h-3.5 w-3.5"} />
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  function renderDatesTrigger(size: "sm" | "lg") {
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          if (openHeroField !== "dates") setDateSearchDraft(appliedDateSearch ?? EMPTY_DATE_SEARCH);
-          setOpenHeroField(openHeroField === "dates" ? null : "dates");
-        }}
-        className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left transition ${
-          size === "lg" ? "px-4 py-4" : "px-3 py-2.5"
-        } ${openHeroField === "dates" ? "bg-orange-50" : "bg-white hover:bg-slate-50"}`}
-      >
-        <span
-          className={`flex items-center gap-1 font-semibold uppercase tracking-wide text-slate-400 ${size === "lg" ? "text-xs" : "text-[10px]"}`}
-        >
-          <IconCalendar className={size === "lg" ? "h-3.5 w-3.5" : "h-3 w-3"} />
-          Dates
-        </span>
-        <span className={`w-full truncate font-semibold text-slate-900 ${size === "lg" ? "text-base" : "text-sm"}`}>
-          {getDateSearchLabel(appliedDateSearch)}
-        </span>
-      </button>
-    );
-  }
-
   return (
     <div className="min-h-dvh bg-slate-50 text-slate-900">
       {/* Top Navigation Bar — only shown once the user has searched; first-run keeps just
           the big centered wordmark rendered in the hero block below (see !hasSearched). */}
       {hasSearched && (
         <header className="sticky top-0 z-[1100] border-b border-slate-200 bg-white/95 backdrop-blur-md">
-          <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
-            <button
-              type="button"
-              onClick={() =>
-                withViewTransition(() => {
-                  clearStoredFeedScroll();
-                  setHasSearched(false);
-                })
-              }
-              aria-label="Back to search"
-              style={{ viewTransitionName: "logo" }}
-              className="text-xl font-extrabold tracking-tight text-slate-900 transition active:scale-95"
-            >
-              trip<span className="text-orange-500">hop</span>
-            </button>
-            <div className="flex items-center gap-2">
-              <div className="flex items-stretch gap-0.5 rounded-full bg-slate-100 p-0.5">
-                <button
-                  type="button"
-                  onClick={switchToFeedView}
-                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                    view === "feed" ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  <IconGrid className="h-3.5 w-3.5" />
-                  Feed
-                </button>
-                <button
-                  type="button"
-                  onClick={switchToMapView}
-                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                    view === "map" ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  <IconMap className="h-3.5 w-3.5" />
-                  Map
-                </button>
-              </div>
-              <button
-                type="button"
-                aria-label="Language and region"
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition active:scale-95 active:bg-slate-200"
-              >
-                <IconGlobe className="h-4.5 w-4.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowSavedOnly((v) => !v)}
-                aria-label={showSavedOnly ? "Show all posts" : "Show saved posts"}
-                aria-pressed={showSavedOnly}
-                className={`flex h-9 w-9 items-center justify-center rounded-full transition active:scale-95 ${
-                  showSavedOnly ? "bg-rose-500 text-white" : "bg-slate-100 text-slate-600 active:bg-slate-200"
-                }`}
-              >
-                <IconHeart className="h-4.5 w-4.5" filled={showSavedOnly} />
-              </button>
-              {currentUser && (
-                <button
-                  type="button"
-                  onClick={() => router.push("/messages")}
-                  aria-label={unreadMessageCount > 0 ? `Messages, ${unreadMessageCount} unread` : "Messages"}
-                  className="relative flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition active:scale-95 active:bg-slate-200"
-                >
-                  <IconMessageCircle className="h-4.5 w-4.5" />
-                  {unreadMessageCount > 0 && (
-                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] font-bold text-white ring-2 ring-white">
-                      {unreadMessageCount > 9 ? "9+" : unreadMessageCount}
-                    </span>
-                  )}
-                </button>
-              )}
-              {!currentUser && (
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => router.push("/sign-in")}
-                    className="rounded-full px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-50 active:scale-95"
-                  >
-                    Log in
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => router.push("/sign-up")}
-                    className="rounded-full bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition active:scale-95 active:bg-orange-600"
-                  >
-                    Sign up
-                  </button>
-                </div>
-              )}
-              <ProfileMenu
-                size="sm"
-                currentUser={currentUser}
-                showProfileMenu={showProfileMenu}
-                setShowProfileMenu={setShowProfileMenu}
-                profileMenuRef={profileMenuRef}
-                router={router}
-                logout={logout}
-              />
-            </div>
-          </div>
+          <TopNavBar
+            view={view}
+            switchToFeedView={switchToFeedView}
+            switchToMapView={switchToMapView}
+            showSavedOnly={showSavedOnly}
+            setShowSavedOnly={setShowSavedOnly}
+            currentUser={currentUser}
+            unreadMessageCount={unreadMessageCount}
+            router={router}
+            showProfileMenu={showProfileMenu}
+            setShowProfileMenu={setShowProfileMenu}
+            profileMenuRef={profileMenuRef}
+            logout={logout}
+            onLogoClick={() =>
+              withViewTransition(() => {
+                clearStoredFeedScroll();
+                setHasSearched(false);
+              })
+            }
+          />
 
-          {/* Hero Search */}
-          <div ref={heroRef} className="relative mx-auto max-w-lg px-4 pb-3">
-            <div className="flex items-stretch gap-2">
-              <div className="flex flex-1 items-stretch overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
-                {renderDestinationTrigger("sm")}
-                {renderDatesTrigger("sm")}
-              </div>
-              <button
-                type="button"
-                onClick={() => setOpenHeroField(openHeroField === "filters" ? null : "filters")}
-                aria-label={hasMoreFiltersActive ? "More filters (active)" : "More filters"}
-                className={`relative flex shrink-0 items-center justify-center rounded-2xl border px-3 transition ${
-                  openHeroField === "filters"
-                    ? "border-orange-300 bg-orange-50 text-orange-600"
-                    : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                <IconSliders className="h-4 w-4" />
-                {hasMoreFiltersActive && (
-                  <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-orange-500 ring-2 ring-white" />
-                )}
-              </button>
-            </div>
-
-            <DestinationPanel
-              isOpen={openHeroField === "destination"}
-              selectedDestinations={selectedDestinations}
-              setSelectedDestinations={setSelectedDestinations}
-              destinationQuery={destinationQuery}
-              setDestinationQuery={setDestinationQuery}
-              destinationResults={destinationResults}
-              destinationKey={destinationKey}
-              toggleSelectedDestination={toggleSelectedDestination}
-              setOpenHeroField={setOpenHeroField}
-            />
-            <DatesPanel
-              isOpen={openHeroField === "dates"}
-              dateSearchDraft={dateSearchDraft}
-              setDateSearchDraft={setDateSearchDraft}
-              setAppliedDateSearch={setAppliedDateSearch}
-              setOpenHeroField={setOpenHeroField}
-              monthOptions={monthOptions}
-              formatMonth={formatMonth}
-              currentMonthKey={currentMonthKey}
-              emptyDateSearch={EMPTY_DATE_SEARCH}
-            />
-
-            {/* "More filters" as an inline row pushing content down, rather than a
-                floating dropdown — merges the trip-style filter in alongside gender
-                and age, all in one place. */}
-            {openHeroField === "filters" && (
-              <div className="mt-2 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">More filters</p>
-                  <button
-                    type="button"
-                    onClick={clearMoreFilters}
-                    className="text-xs font-semibold text-slate-400 transition hover:text-slate-700 hover:underline"
-                  >
-                    Clear
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  <button
-                    type="button"
-                    onClick={() => setVibeFilter("All")}
-                    className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
-                      vibeFilter === "All"
-                        ? "bg-slate-900 text-white ring-slate-900"
-                        : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                    }`}
-                  >
-                    All styles
-                  </button>
-                  {TRIP_STYLES.map((vibe) => (
-                    <button
-                      key={vibe}
-                      type="button"
-                      onClick={() => setVibeFilter(vibe)}
-                      className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
-                        vibeFilter === vibe
-                          ? "bg-slate-900 text-white ring-slate-900"
-                          : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                      }`}
-                    >
-                      {vibe}
-                    </button>
-                  ))}
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Gender</label>
-                  <div className="flex overflow-hidden rounded-xl ring-1 ring-inset ring-slate-200">
-                    {(["All", ...GENDERS] as const).map((option) => (
-                      <button
-                        key={option}
-                        type="button"
-                        onClick={() => setGenderFilter(option)}
-                        className={`flex-1 py-2 text-xs font-semibold transition ${
-                          genderFilter === option
-                            ? "bg-orange-50 text-orange-700"
-                            : "bg-white text-slate-600 hover:bg-slate-50"
-                        }`}
-                      >
-                        {option === "All" ? "Any" : option}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-500">Age</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      inputMode="numeric"
-                      value={ageMinFilter}
-                      onChange={(e) => setAgeMinFilter(e.target.value)}
-                      placeholder="Min"
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-                    />
-                    <span className="text-xs text-slate-400">to</span>
-                    <input
-                      type="number"
-                      min={0}
-                      inputMode="numeric"
-                      value={ageMaxFilter}
-                      onChange={(e) => setAgeMaxFilter(e.target.value)}
-                      placeholder="Max"
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          <HeroSearch
+            variant="compact"
+            heroRef={heroRef}
+            openHeroField={openHeroField}
+            setOpenHeroField={setOpenHeroField}
+            selectedDestinations={selectedDestinations}
+            setSelectedDestinations={setSelectedDestinations}
+            destinationQuery={destinationQuery}
+            setDestinationQuery={setDestinationQuery}
+            destinationResults={destinationResults}
+            destinationKey={destinationKey}
+            toggleSelectedDestination={toggleSelectedDestination}
+            appliedDateSearch={appliedDateSearch}
+            dateSearchDraft={dateSearchDraft}
+            setDateSearchDraft={setDateSearchDraft}
+            setAppliedDateSearch={setAppliedDateSearch}
+            monthOptions={monthOptions}
+            formatMonth={formatMonth}
+            currentMonthKey={currentMonthKey}
+            emptyDateSearch={EMPTY_DATE_SEARCH}
+            getDateSearchLabel={getDateSearchLabel}
+            hasMoreFiltersActive={hasMoreFiltersActive}
+            clearMoreFilters={clearMoreFilters}
+            vibeFilter={vibeFilter}
+            setVibeFilter={setVibeFilter}
+            genderFilter={genderFilter}
+            setGenderFilter={setGenderFilter}
+            ageMinFilter={ageMinFilter}
+            setAgeMinFilter={setAgeMinFilter}
+            ageMaxFilter={ageMaxFilter}
+            setAgeMaxFilter={setAgeMaxFilter}
+            tripStyles={TRIP_STYLES}
+            genders={GENDERS}
+          />
         </header>
       )}
 
       {/* Main content */}
       <main className="mx-auto max-w-lg px-4 py-5 pb-24">
         {!hasSearched ? (
-          <div className="relative flex min-h-[70vh] flex-col items-center justify-center gap-6 text-center">
-            <div className="absolute inset-x-0 top-0 flex items-center justify-end gap-2">
-              {currentUser ? (
-                <ProfileMenu
-                  size="lg"
-                  currentUser={currentUser}
-                  showProfileMenu={showProfileMenu}
-                  setShowProfileMenu={setShowProfileMenu}
-                  profileMenuRef={profileMenuRef}
-                  router={router}
-                  logout={logout}
-                />
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => router.push("/sign-in")}
-                    className="rounded-full px-3.5 py-2 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-50 active:scale-95"
-                  >
-                    Log in
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => router.push("/sign-up")}
-                    className="rounded-full bg-orange-500 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition active:scale-95 active:bg-orange-600"
-                  >
-                    Sign up
-                  </button>
-                </>
-              )}
-            </div>
-            <h1
-              style={{ viewTransitionName: "logo" }}
-              className="text-5xl font-extrabold tracking-tight text-slate-900"
-            >
-              trip<span className="text-orange-500">hop</span>
-            </h1>
-
-            <div>
-              <h2 className="text-xl font-bold text-slate-900">
-                Where&apos;s your next trip{currentUser ? `, ${currentUser.firstName}` : ""}?
-              </h2>
-              <p className="mt-1.5 text-sm text-slate-500">Find travelers heading your way.</p>
-            </div>
-
-            <div ref={heroRef} className="relative w-full max-w-sm">
-              <div className="flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md">
-                <div ref={measureHeroDestinationRow}>{renderDestinationTrigger("lg")}</div>
-                {renderDatesTrigger("lg")}
-              </div>
-
-              <DestinationPanel
-                isOpen={openHeroField === "destination"}
-                topOffsetPx={heroDestinationRowHeight}
-                selectedDestinations={selectedDestinations}
-                setSelectedDestinations={setSelectedDestinations}
-                destinationQuery={destinationQuery}
-                setDestinationQuery={setDestinationQuery}
-                destinationResults={destinationResults}
-                destinationKey={destinationKey}
-                toggleSelectedDestination={toggleSelectedDestination}
-                setOpenHeroField={setOpenHeroField}
-              />
-              <DatesPanel
-                isOpen={openHeroField === "dates"}
-                dateSearchDraft={dateSearchDraft}
-                setDateSearchDraft={setDateSearchDraft}
-                setAppliedDateSearch={setAppliedDateSearch}
-                setOpenHeroField={setOpenHeroField}
-                monthOptions={monthOptions}
-                formatMonth={formatMonth}
-                currentMonthKey={currentMonthKey}
-                emptyDateSearch={EMPTY_DATE_SEARCH}
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => withViewTransition(() => setHasSearched(true))}
-              className="w-full max-w-sm rounded-2xl bg-orange-500 py-3 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-orange-600"
-            >
-              Search trips
-            </button>
-          </div>
+          <HeroSearch
+            variant="full"
+            heroRef={heroRef}
+            openHeroField={openHeroField}
+            setOpenHeroField={setOpenHeroField}
+            selectedDestinations={selectedDestinations}
+            setSelectedDestinations={setSelectedDestinations}
+            destinationQuery={destinationQuery}
+            setDestinationQuery={setDestinationQuery}
+            destinationResults={destinationResults}
+            destinationKey={destinationKey}
+            toggleSelectedDestination={toggleSelectedDestination}
+            appliedDateSearch={appliedDateSearch}
+            dateSearchDraft={dateSearchDraft}
+            setDateSearchDraft={setDateSearchDraft}
+            setAppliedDateSearch={setAppliedDateSearch}
+            monthOptions={monthOptions}
+            formatMonth={formatMonth}
+            currentMonthKey={currentMonthKey}
+            emptyDateSearch={EMPTY_DATE_SEARCH}
+            getDateSearchLabel={getDateSearchLabel}
+            currentUser={currentUser}
+            router={router}
+            showProfileMenu={showProfileMenu}
+            setShowProfileMenu={setShowProfileMenu}
+            profileMenuRef={profileMenuRef}
+            logout={logout}
+            measureHeroDestinationRow={measureHeroDestinationRow}
+            heroDestinationRowHeight={heroDestinationRowHeight}
+            onSearch={() => withViewTransition(() => setHasSearched(true))}
+          />
         ) : view === "feed" ? (
           <FeedList
             posts={posts}
