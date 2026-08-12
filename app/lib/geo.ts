@@ -268,9 +268,12 @@ export type GeocodeResult = {
   lng: number;
   bbox?: [number, number, number, number];
   countryCode?: string;
+  /** Mapbox's feature id, kept for reference on stored places — never used as an identity key. */
+  mapboxId?: string;
 };
 
 type MapboxFeature = {
+  id?: string;
   text: string;
   place_type?: string[];
   center: [number, number];
@@ -318,6 +321,7 @@ export async function geocodePlace(query: string): Promise<GeocodeResult | null>
       lng,
       bbox: feature.bbox,
       countryCode: extractCountryCode(feature),
+      mapboxId: feature.id,
     };
     geocodeCache.set(query, result);
     return result;

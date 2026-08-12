@@ -1,6 +1,6 @@
 import dynamic from "next/dynamic";
 import { IconX } from "./icons";
-import type { FeedMapPost } from "./TripMap";
+import type { MapPoint, MapViewport } from "../lib/mapStore";
 import Avatar from "./Avatar";
 import type { Post } from "../page";
 
@@ -12,8 +12,15 @@ const TripMap = dynamic(() => import("./TripMap"), {
 });
 
 export type FeedMapViewProps = {
-  mapMarkers: FeedMapPost[];
-  activeFocusedMapPostId: string | null;
+  points: MapPoint[];
+  /** Total posts matching the filters, ignoring the viewport. */
+  totalCount: number;
+  /** True when the server capped its rows and the map is showing a subset. */
+  truncated: boolean;
+  onViewportChange: (viewport: MapViewport) => void;
+  initialBounds: [number, number, number, number] | null;
+  focusedMapPostId: string | null;
+  focusedCountryCodes: string[];
   setFocusedMapPostId: (id: string | null) => void;
   focusedMapPost: Post | null;
   setViewPostId: (id: string | null) => void;
@@ -24,8 +31,13 @@ export type FeedMapViewProps = {
 };
 
 export function FeedMapView({
-  mapMarkers,
-  activeFocusedMapPostId,
+  points,
+  totalCount,
+  truncated,
+  onViewportChange,
+  initialBounds,
+  focusedMapPostId,
+  focusedCountryCodes,
   setFocusedMapPostId,
   focusedMapPost,
   setViewPostId,
@@ -38,14 +50,21 @@ export function FeedMapView({
     <div className="flex flex-col gap-3">
       <div className="px-1">
         <h1 className="text-lg font-bold text-slate-900">Where trips are happening</h1>
-        <p className="text-xs text-slate-500">Tap a pin to see who&apos;s heading there.</p>
+        <p className="text-xs text-slate-500">
+          {totalCount > 0
+            ? `${totalCount} ${totalCount === 1 ? "trip" : "trips"} match your filters. Zoom in to break the groups apart.`
+            : "Tap a pin to see who's heading there."}
+        </p>
       </div>
 
       <div className="relative h-[420px] overflow-hidden rounded-2xl border border-slate-200">
         <TripMap
-          posts={mapMarkers}
-          focusedPostId={activeFocusedMapPostId}
+          points={points}
+          focusedPostId={focusedMapPostId}
+          focusedCountryCodes={focusedCountryCodes}
           onSelectPost={(id) => setFocusedMapPostId(id)}
+          onViewportChange={onViewportChange}
+          initialBounds={initialBounds}
         />
 
         {focusedMapPost && (
@@ -96,8 +115,12 @@ export function FeedMapView({
           </div>
         )}
       </div>
+      {/* Says so out loud when the viewport holds more than the server will return, rather
+          than quietly showing a subset — the failure the old feed-derived map had. */}
       <p className="px-1 text-center text-xs text-slate-400">
-        Tap a pin to preview that trip and message on WhatsApp.
+        {truncated
+          ? "Showing the busiest trips in this area — zoom in to see them all."
+          : "Tap a pin to preview that trip and message on WhatsApp."}
       </p>
     </div>
   );

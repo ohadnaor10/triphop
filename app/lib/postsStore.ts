@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { INITIAL_POSTS } from "../data/mockPosts";
 import type { Destination, FocusedDestination, Gender, Post, SearchDestination, TripDate, TripVibe } from "../page";
 import { postMatchesDestinationSearch, warmGeocode } from "./geo";
+import { syncPostPlaces } from "./places";
 import { hasActiveDateSearch, rankByRelevance, type DateSearchInput } from "./relevance";
 import { useClerkSupabaseClient } from "./supabase/useClerkSupabaseClient";
 import { SUPABASE_CONFIGURED } from "./supabase/configured";
@@ -16,7 +17,7 @@ const AVATAR_COLORS = [
   "bg-gradient-to-br from-fuchsia-400 to-purple-500",
 ];
 
-function colorFor(id: string): string {
+export function colorFor(id: string): string {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
@@ -397,18 +398,25 @@ function useSupabasePostsStore(filters: PostsFilters): PostsStore {
   const addPost = useCallback(
     async (input: PostInput) => {
       if (!currentUser) return "Not signed in";
-      const { error } = await supabase.from("posts").insert({
-        user_id: currentUser.id,
-        destinations: input.destinations,
-        date: input.date,
-        vibes: input.vibes,
-        bio: input.bio,
-        share_contact: input.shareContact,
-      });
+      const { data, error } = await supabase
+        .from("posts")
+        .insert({
+          user_id: currentUser.id,
+          destinations: input.destinations,
+          date: input.date,
+          vibes: input.vibes,
+          bio: input.bio,
+          share_contact: input.shareContact,
+        })
+        .select("id")
+        .single();
       if (error) {
         console.error("Failed to create post:", error);
         return error.message;
       }
+      // Awaited but never fatal: syncPostPlaces swallows its own failures, since a post
+      // that can't be pinned on the map is still a perfectly good post.
+      if (data?.id) await syncPostPlaces(supabase, data.id, input.destinations);
       await refresh();
       return null;
     },
@@ -431,6 +439,9 @@ function useSupabasePostsStore(filters: PostsFilters): PostsStore {
         console.error("Failed to update post:", error);
         return error.message;
       }
+      // Destinations can change on edit, so the place links are replaced wholesale
+      // rather than added to — see syncPostPlaces.
+      await syncPostPlaces(supabase, id, input.destinations);
       await refresh();
       return null;
     },

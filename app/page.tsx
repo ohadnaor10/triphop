@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type SubmitEvent } from "react";
 import { flushSync } from "react-dom";
 import { IconPlus } from "./components/icons";
-import type { FeedMapPoint, FeedMapPost } from "./components/TripMap";
+import turfBbox from "@turf/bbox";
 import Combobox from "./components/Combobox";
 import CreatePostModal from "./components/CreatePostModal";
 import DateSearchFields from "./components/DateSearchFields";
@@ -18,8 +18,11 @@ import {
   geocodePlace,
   geocodeSuggestions,
   getAllCountries,
+  getCachedGeocode,
   getCitiesOfCountry,
+  getCountryBoundary,
   getCountryByCode,
+  getRegionBoundary,
   REGION_CENTROIDS,
   REGIONS,
   type Region,
@@ -27,6 +30,7 @@ import {
 import { hasActiveDateSearch, type DateSearchInput } from "./lib/relevance";
 import { useAuth } from "./context/AuthContext";
 import { useUnreadMessageCount } from "./lib/messagesStore";
+import { useFocusedMapPost, useMapPoints, type MapViewport } from "./lib/mapStore";
 import { usePostsStore, type PostsFilters } from "./lib/postsStore";
 import { useClerkSupabaseClient } from "./lib/supabase/useClerkSupabaseClient";
 
@@ -293,57 +297,60 @@ async function getDestinationPoints(destinations: Destination[]): Promise<GeoPoi
   return perDestination.flat();
 }
 
-// A "specific" destination is a real, pinnable spot — a city picked under a focused
-// country. Bare countries (no cities) and broad regions carry no pinpoint location, so
-// they're excluded from the feed map entirely (see getFeedMapPost below).
-type SpecificDestination = { name: string; query: string; countryCode: string; country: string };
+// Bounding box the map should open on for a set of searched destinations — the bridge
+// between the feed's destination filter and the map's viewport, since on the map the
+// viewport *is* the destination filter. Everything here reads from data already bundled
+// or already cached; nothing geocodes, so opening the map costs no network.
+function boundsForDestinations(destinations: SearchDestination[]): [number, number, number, number] | null {
+  let minLng = 180;
+  let minLat = 90;
+  let maxLng = -180;
+  let maxLat = -90;
+  let found = false;
 
-function getSpecificDestinations(destinations: Destination[]): SpecificDestination[] {
-  const out: SpecificDestination[] = [];
+  const extend = (bbox: [number, number, number, number]) => {
+    minLng = Math.min(minLng, bbox[0]);
+    minLat = Math.min(minLat, bbox[1]);
+    maxLng = Math.max(maxLng, bbox[2]);
+    maxLat = Math.max(maxLat, bbox[3]);
+    found = true;
+  };
+  // A city has no polygon of its own, so it contributes a small box around its point —
+  // wide enough that fitBounds lands on a city-level zoom rather than the ground.
+  const extendPoint = (lat: number, lng: number, pad = 0.5) =>
+    extend([lng - pad, lat - pad, lng + pad, lat + pad]);
+
   for (const destination of destinations) {
-    if (destination.mode !== "focused") continue;
-    for (const city of destination.cities) {
-      out.push({
-        name: city,
-        query: `${city}, ${destination.country}`,
-        countryCode: destination.countryCode,
-        country: destination.country,
-      });
+    if (destination.type === "country") {
+      const boundary = getCountryBoundary(destination.code);
+      if (boundary) extend(turfBbox(boundary) as [number, number, number, number]);
+      else {
+        const country = getCountryByCode(destination.code);
+        if (country) extendPoint(country.lat, country.lng, 3);
+      }
+    } else if (destination.type === "region") {
+      const boundary = getRegionBoundary(destination.name);
+      if (boundary) extend(turfBbox(boundary) as [number, number, number, number]);
+      else {
+        const centroid = REGION_CENTROIDS[destination.name];
+        if (centroid) extendPoint(centroid.lat, centroid.lng, 20);
+      }
+    } else if (destination.type === "place") {
+      if (destination.bbox) extend(destination.bbox);
+    } else {
+      // City: the picker's own dataset already carries its coordinates, and the geocode
+      // cache may hold a tighter box from when it was selected.
+      const cached = getCachedGeocode(`${destination.name}, ${destination.countryName}`);
+      if (cached?.bbox) extend(cached.bbox);
+      else if (cached) extendPoint(cached.lat, cached.lng);
+      else {
+        const city = getCitiesOfCountry(destination.countryCode).find((c) => c.name === destination.name);
+        if (city && !(city.lat === 0 && city.lng === 0)) extendPoint(city.lat, city.lng);
+      }
     }
   }
-  return out;
-}
 
-// Resolves one specific destination to real coordinates, or null if nothing usable is
-// available. Never falls back to (0, 0) — an unresolvable "null island" point would
-// render as a pin adrift in the Gulf of Guinea, indistinguishable from a real bug.
-async function resolveFeedMapPoint(dest: SpecificDestination): Promise<FeedMapPoint | null> {
-  const geocoded = await geocodePlace(dest.query);
-  if (geocoded) {
-    return { name: dest.name, lat: geocoded.lat, lng: geocoded.lng, bbox: geocoded.bbox, countryCode: dest.countryCode };
-  }
-  const country = getCountryByCode(dest.countryCode);
-  if (!country) return null;
-  return { name: dest.name, lat: country.lat, lng: country.lng, countryCode: dest.countryCode };
-}
-
-async function getFeedMapPost(post: Post): Promise<FeedMapPost | null> {
-  const specific = getSpecificDestinations(post.destinations);
-  if (specific.length === 0) return null;
-
-  const resolved = await Promise.all(specific.map(resolveFeedMapPoint));
-  const points = resolved.filter((p): p is FeedMapPoint => p !== null);
-  if (points.length === 0) return null;
-
-  return {
-    id: post.id,
-    points,
-    countryCodes: [...new Set(specific.map((d) => d.countryCode))],
-    destinationLabel: getDestinationLabel(post.destinations),
-    dateLabel: getDateLabel(post.date),
-    userLabel: `${post.user.name} · ${post.user.age} · ${formatGender(post.user.gender)}`,
-    whatsapp: post.whatsapp,
-  };
+  return found ? [minLng, minLat, maxLng, maxLat] : null;
 }
 
 function initials(name: string) {
@@ -1077,24 +1084,37 @@ function HomePageContent() {
     };
   }
 
-  const [mapMarkers, setMapMarkers] = useState<FeedMapPost[]>([]);
+  // ---------- Map view data ----------
+  //
+  // Entirely separate from the feed's `posts`: the map queries by the area currently on
+  // screen (see app/lib/mapStore.ts + supabase/migrations/0016_search_posts_map.sql),
+  // where the feed pages by scroll depth. Deriving pins from `posts`, as this used to,
+  // meant the map's contents depended on how far the user had scrolled the feed first.
+  const [mapViewport, setMapViewport] = useState<MapViewport | null>(null);
   const [focusedMapPostId, setFocusedMapPostId] = useState<string | null>(null);
+  const { points: mapPoints, totalCount: mapTotalCount, truncated: mapTruncated } = useMapPoints(filters, mapViewport);
+  const focusedMapPost = useFocusedMapPost(focusedMapPostId, posts);
+  const focusedMapCountryCodes = useMemo(
+    () =>
+      focusedMapPost
+        ? [
+            ...new Set(
+              focusedMapPost.destinations
+                .filter((d): d is FocusedDestination => d.mode === "focused")
+                .map((d) => d.countryCode),
+            ),
+          ]
+        : [],
+    [focusedMapPost],
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all(posts.map((post) => getFeedMapPost(post))).then((results) => {
-      if (!cancelled) setMapMarkers(results.filter((r): r is FeedMapPost => r !== null));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [posts]);
-
-  // Derived rather than synced via effect: once a post drops out of mapMarkers (filtered
-  // out or no longer has a specific destination), its pin — and thus its focus — is gone.
-  const activeFocusedMapPostId =
-    focusedMapPostId && mapMarkers.some((m) => m.id === focusedMapPostId) ? focusedMapPostId : null;
-  const focusedMapPost = activeFocusedMapPostId ? posts.find((p) => p.id === activeFocusedMapPostId) ?? null : null;
+  // Opening camera for the map: the destination the user searched for, applied once per
+  // distinct selection. After that their own pan/zoom is what the map remembers — a new
+  // destination search re-arms it, the same selection doesn't.
+  const mapInitialBounds = useMemo(() => {
+    if (selectedDestinations.length === 0) return null;
+    return boundsForDestinations(selectedDestinations);
+  }, [selectedDestinations]);
 
   function toggleFormVibe(vibe: TripVibe) {
     setForm((prev) => ({
@@ -1257,6 +1277,9 @@ function HomePageContent() {
 
           <HeroSearch
             variant="compact"
+            // On the map, pan/zoom is the destination filter — see search_posts_map's
+            // deliberate lack of a p_destinations parameter.
+            destinationDisabled={view === "map"}
             heroRef={heroRef}
             openHeroField={openHeroField}
             setOpenHeroField={setOpenHeroField}
@@ -1346,8 +1369,13 @@ function HomePageContent() {
           />
         ) : (
           <FeedMapView
-            mapMarkers={mapMarkers}
-            activeFocusedMapPostId={activeFocusedMapPostId}
+            points={mapPoints}
+            totalCount={mapTotalCount}
+            truncated={mapTruncated}
+            onViewportChange={setMapViewport}
+            initialBounds={mapInitialBounds}
+            focusedMapPostId={focusedMapPostId}
+            focusedCountryCodes={focusedMapCountryCodes}
             setFocusedMapPostId={setFocusedMapPostId}
             focusedMapPost={focusedMapPost}
             setViewPostId={setViewPostId}
