@@ -31,13 +31,15 @@ export function MonthGrid({
 
   return (
     <div>
-      <p className="mb-2 text-center text-sm font-semibold text-slate-900">{label}</p>
-      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium text-slate-400">
+      <p className="mb-1 text-center text-sm font-semibold text-slate-900">{label}</p>
+      <div className="grid grid-cols-7 gap-x-1 text-center text-[10px] font-medium text-slate-400">
         {WEEKDAYS.map((d, i) => (
           <div key={i}>{d}</div>
         ))}
       </div>
-      <div className="mt-1 grid grid-cols-7 gap-1 justify-items-center">
+      {/* No row gap: the 8x8 pills already carry their own visual spacing, and six rows
+          of gap is the difference between the panel fitting a phone screen and not. */}
+      <div className="grid grid-cols-7 gap-x-1 justify-items-center">
         {cells.map((iso, i) => {
           if (!iso) return <div key={i} />;
           const isPast = iso < todayISO;

@@ -11,16 +11,6 @@ type DestinationResults = {
 export type DestinationPanelProps = {
   /** Whether the panel should render at all — mirrors `openHeroField === "destination"`. */
   isOpen: boolean;
-  /**
-   * Pixel offset from the panel's positioning container, used by the hero (first-run)
-   * search where destination/dates stack vertically — without it, the panel would sit
-   * below the *entire* stacked trigger box (i.e. below the dates row too) instead of
-   * directly under the destination row it belongs to. The header search's
-   * destination/dates triggers sit side by side instead, where the panel's default flow
-   * position (right after the whole trigger row) is already correct, so it's omitted
-   * there.
-   */
-  topOffsetPx?: number;
   selectedDestinations: SearchDestination[];
   setSelectedDestinations: (value: SearchDestination[] | ((prev: SearchDestination[]) => SearchDestination[])) => void;
   destinationQuery: string;
@@ -33,7 +23,6 @@ export type DestinationPanelProps = {
 
 export default function DestinationPanel({
   isOpen,
-  topOffsetPx,
   selectedDestinations,
   setSelectedDestinations,
   destinationQuery,
@@ -45,13 +34,11 @@ export default function DestinationPanel({
 }: DestinationPanelProps) {
   if (!isOpen) return null;
   return (
-    <div
-      className={`absolute inset-x-4 z-50 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg ${
-        topOffsetPx === undefined ? "mt-2" : ""
-      }`}
-      style={topOffsetPx === undefined ? undefined : { top: topOffsetPx + 8 }}
-    >
-      <div className="max-h-72 overflow-y-auto p-3">
+    // Fixed to the viewport bottom (rather than positioned relative to the trigger)
+    // so the whole panel — including the Apply/Clear buttons — always stays within
+    // the visible screen, regardless of where the trigger sits or how tall the page is.
+    <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+1rem)] top-auto z-50 flex max-h-[75dvh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {selectedDestinations.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {selectedDestinations.map((d) => (
@@ -133,7 +120,7 @@ export default function DestinationPanel({
         )}
       </div>
 
-      <div className="flex items-center gap-2 border-t border-slate-100 p-3">
+      <div className="flex shrink-0 items-center gap-2 border-t border-slate-100 p-3">
         <button
           type="button"
           onClick={() => {

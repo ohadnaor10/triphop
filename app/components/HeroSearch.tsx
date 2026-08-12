@@ -62,8 +62,6 @@ type FullVariantProps = SharedProps & {
   setShowProfileMenu: (value: boolean | ((prev: boolean) => boolean)) => void;
   profileMenuRef: RefObject<HTMLDivElement | null>;
   logout: () => void;
-  measureHeroDestinationRow: (node: HTMLDivElement | null) => void;
-  heroDestinationRowHeight: number;
   onSearch: () => void;
 };
 
@@ -73,11 +71,7 @@ export type HeroSearchProps = CompactVariantProps | FullVariantProps;
 // compact sticky-header search bar (shown once the user has searched) and the large,
 // centered first-run prompt (shown before that) — same behavior, different sizing, so
 // the two surfaces can't drift apart.
-function renderDestinationTrigger(
-  size: "sm" | "lg",
-  props: SharedProps,
-  extraRef?: (node: HTMLDivElement | null) => void,
-) {
+function renderDestinationTrigger(size: "sm" | "lg", props: SharedProps) {
   const { openHeroField, setOpenHeroField, selectedDestinations } = props;
   const hasSelection = selectedDestinations.length > 0;
   const content = (
@@ -118,8 +112,7 @@ function renderDestinationTrigger(
       )}
     </div>
   );
-  if (!extraRef) return content;
-  return <div ref={extraRef}>{content}</div>;
+  return content;
 }
 
 function renderDatesTrigger(size: "sm" | "lg", props: SharedProps) {
@@ -148,7 +141,7 @@ function renderDatesTrigger(size: "sm" | "lg", props: SharedProps) {
   );
 }
 
-function renderPanels(props: SharedProps, topOffsetPx?: number) {
+function renderPanels(props: SharedProps) {
   const {
     openHeroField,
     selectedDestinations,
@@ -171,7 +164,6 @@ function renderPanels(props: SharedProps, topOffsetPx?: number) {
     <>
       <DestinationPanel
         isOpen={openHeroField === "destination"}
-        topOffsetPx={topOffsetPx}
         selectedDestinations={selectedDestinations}
         setSelectedDestinations={setSelectedDestinations}
         destinationQuery={destinationQuery}
@@ -345,8 +337,6 @@ function FullHeroSearch(props: FullVariantProps) {
     setShowProfileMenu,
     profileMenuRef,
     logout,
-    measureHeroDestinationRow,
-    heroDestinationRowHeight,
     onSearch,
   } = props;
   return (
@@ -394,11 +384,11 @@ function FullHeroSearch(props: FullVariantProps) {
 
       <div ref={heroRef} className="relative w-full max-w-sm">
         <div className="flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-md">
-          {renderDestinationTrigger("lg", props, measureHeroDestinationRow)}
+          {renderDestinationTrigger("lg", props)}
           {renderDatesTrigger("lg", props)}
         </div>
 
-        {renderPanels(props, heroDestinationRowHeight)}
+        {renderPanels(props)}
       </div>
 
       <button

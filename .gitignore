@@ -45,3 +45,6 @@ next-env.d.ts
 
 # supabase CLI local cache
 /supabase/.temp/
+
+# local-only reference docs
+/REFERENCE_MAP.md

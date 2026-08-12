@@ -28,8 +28,11 @@ export default function DatesPanel({
 }: DatesPanelProps) {
   if (!isOpen) return null;
   return (
-    <div className="absolute inset-x-4 z-50 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-      <div className="flex gap-1 border-b border-slate-100 p-1.5">
+    // Fixed to the viewport bottom (rather than positioned relative to the trigger)
+    // so the whole panel — including the Apply/Clear buttons — always stays within
+    // the visible screen, regardless of where the trigger sits or how tall the page is.
+    <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+1rem)] top-auto z-50 flex max-h-[75dvh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+      <div className="flex shrink-0 gap-1 border-b border-slate-100 p-1.5">
         <button
           type="button"
           onClick={() => setDateSearchDraft((d) => ({ ...d, mode: "specific" }))}
@@ -50,7 +53,7 @@ export default function DatesPanel({
         </button>
       </div>
 
-      <div className="overflow-hidden p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {dateSearchDraft.mode === "specific" ? (
           <CalendarRangePicker
             months={1}
@@ -81,7 +84,7 @@ export default function DatesPanel({
         )}
       </div>
 
-      <div className="flex items-center gap-2 border-t border-slate-100 p-3">
+      <div className="flex shrink-0 items-center gap-2 border-t border-slate-100 p-2.5">
         <button
           type="button"
           onClick={() => {

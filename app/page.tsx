@@ -613,21 +613,6 @@ function HomePageContent() {
   const hasMoreFiltersActive =
     vibeFilter !== "All" || genderFilter !== "All" || ageMinFilter.trim() !== "" || ageMaxFilter.trim() !== "";
 
-  // Measures the hero's destination row so its dropdown panel (see renderDestinationPanel's
-  // topOffsetPx) can be positioned directly beneath it instead of below the whole stacked
-  // destination+dates box. A ResizeObserver rather than a one-off measurement — the row's
-  // height can change (e.g. destination text wrapping differently) without the component
-  // re-rendering for an unrelated reason.
-  const [heroDestinationRowHeight, setHeroDestinationRowHeight] = useState(0);
-  const heroDestinationRowObserverRef = useRef<ResizeObserver | null>(null);
-  const measureHeroDestinationRow = useCallback((node: HTMLDivElement | null) => {
-    heroDestinationRowObserverRef.current?.disconnect();
-    if (!node) return;
-    const observer = new ResizeObserver((entries) => setHeroDestinationRowHeight(entries[0].contentRect.height));
-    observer.observe(node);
-    heroDestinationRowObserverRef.current = observer;
-  }, []);
-
   const [openHeroField, setOpenHeroField] = useState<"destination" | "dates" | "filters" | null>(null);
   // Whether the user has performed their first search yet — gates the full-screen,
   // centered destination/dates prompt (see below) that replaces the feed on first run,
@@ -1337,8 +1322,6 @@ function HomePageContent() {
             setShowProfileMenu={setShowProfileMenu}
             profileMenuRef={profileMenuRef}
             logout={logout}
-            measureHeroDestinationRow={measureHeroDestinationRow}
-            heroDestinationRowHeight={heroDestinationRowHeight}
             onSearch={() => withViewTransition(() => setHasSearched(true))}
           />
         ) : view === "feed" ? (
