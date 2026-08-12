@@ -1,4 +1,5 @@
 import CalendarRangePicker from "./CalendarRangePicker";
+import HeroPanelShell from "./HeroPanelShell";
 import MonthCarousel from "./MonthCarousel";
 import type { DateSearchUI } from "../page";
 
@@ -28,10 +29,7 @@ export default function DatesPanel({
 }: DatesPanelProps) {
   if (!isOpen) return null;
   return (
-    // Fixed to the viewport bottom (rather than positioned relative to the trigger)
-    // so the whole panel — including the Apply/Clear buttons — always stays within
-    // the visible screen, regardless of where the trigger sits or how tall the page is.
-    <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+1rem)] top-auto z-50 flex max-h-[75dvh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+    <HeroPanelShell>
       <div className="flex shrink-0 gap-1 border-b border-slate-100 p-1.5">
         <button
           type="button"
@@ -111,6 +109,6 @@ export default function DatesPanel({
           Apply
         </button>
       </div>
-    </div>
+    </HeroPanelShell>
   );
 }

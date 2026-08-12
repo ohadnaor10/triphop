@@ -1,3 +1,4 @@
+import HeroPanelShell from "./HeroPanelShell";
 import { IconX } from "./icons";
 import type { SearchDestination } from "../page";
 
@@ -34,11 +35,11 @@ export default function DestinationPanel({
 }: DestinationPanelProps) {
   if (!isOpen) return null;
   return (
-    // Fixed to the viewport bottom (rather than positioned relative to the trigger)
-    // so the whole panel — including the Apply/Clear buttons — always stays within
-    // the visible screen, regardless of where the trigger sits or how tall the page is.
-    <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+1rem)] top-auto z-50 flex max-h-[75dvh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+    <HeroPanelShell>
+      {/* Chips + search box stay pinned: the panel is height-capped, and an open keyboard
+          shrinks it further, so letting the input scroll away with the results would hide
+          the very field the keyboard is typing into. */}
+      <div className="shrink-0 p-3 pb-0">
         {selectedDestinations.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {selectedDestinations.map((d) => (
@@ -73,9 +74,11 @@ export default function DestinationPanel({
           value={destinationQuery}
           onChange={(e) => setDestinationQuery(e.target.value)}
           placeholder="Search continents, regions, countries, cities…"
-          className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
         />
+      </div>
 
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2">
         {destinationResults.countries.length === 0 &&
           destinationResults.regions.length === 0 &&
           destinationResults.cities.length === 0 &&
@@ -139,6 +142,6 @@ export default function DestinationPanel({
           Apply
         </button>
       </div>
-    </div>
+    </HeroPanelShell>
   );
 }
