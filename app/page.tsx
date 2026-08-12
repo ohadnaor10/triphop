@@ -11,7 +11,6 @@ import {
   IconGlobe,
   IconGrid,
   IconHeart,
-  IconLogOut,
   IconMap,
   IconMapPin,
   IconMessageCircle,
@@ -19,16 +18,16 @@ import {
   IconSearch,
   IconSliders,
   IconTrash,
-  IconUser,
   IconWhatsApp,
   IconX,
 } from "./components/icons";
 import type { FeedMapPoint, FeedMapPost } from "./components/TripMap";
 import Avatar from "./components/Avatar";
 import Combobox from "./components/Combobox";
-import CalendarRangePicker from "./components/CalendarRangePicker";
 import DateSearchFields from "./components/DateSearchFields";
-import MonthCarousel from "./components/MonthCarousel";
+import DatesPanel from "./components/DatesPanel";
+import DestinationPanel from "./components/DestinationPanel";
+import ProfileMenu from "./components/ProfileMenu";
 import { getPopularDestinations } from "./data/popularDestinations";
 import {
   geocodePlace,
@@ -1345,272 +1344,6 @@ function HomePageContent() {
     );
   }
 
-  // topOffsetPx: pixel offset from the panel's positioning container, used by the hero
-  // (first-run) search where destination/dates stack vertically — without it, the panel
-  // would sit below the *entire* stacked trigger box (i.e. below the dates row too)
-  // instead of directly under the destination row it belongs to. The header search's
-  // destination/dates triggers sit side by side instead, where the panel's default
-  // flow position (right after the whole trigger row) is already correct, so it's
-  // omitted there.
-  function renderDestinationPanel(topOffsetPx?: number) {
-    if (openHeroField !== "destination") return null;
-    return (
-      <div
-        className={`absolute inset-x-4 z-50 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg ${
-          topOffsetPx === undefined ? "mt-2" : ""
-        }`}
-        style={topOffsetPx === undefined ? undefined : { top: topOffsetPx + 8 }}
-      >
-        <div className="max-h-72 overflow-y-auto p-3">
-          {selectedDestinations.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {selectedDestinations.map((d) => (
-                <span
-                  key={destinationKey(d)}
-                  className="flex items-center gap-1 rounded-full bg-orange-500 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white"
-                >
-                  {d.name}
-                  <button
-                    type="button"
-                    onClick={() => toggleSelectedDestination(d)}
-                    aria-label={`Remove ${d.name}`}
-                    className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-orange-600"
-                  >
-                    <IconX className="h-2.5 w-2.5" />
-                  </button>
-                </span>
-              ))}
-              <button
-                type="button"
-                onClick={() => setSelectedDestinations([])}
-                className="ml-1 text-xs font-semibold text-slate-400 transition hover:text-slate-700 hover:underline"
-              >
-                Clear
-              </button>
-            </div>
-          )}
-
-          <input
-            type="text"
-            autoFocus
-            value={destinationQuery}
-            onChange={(e) => setDestinationQuery(e.target.value)}
-            placeholder="Search continents, regions, countries, cities…"
-            className="mb-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
-          />
-
-          {destinationResults.countries.length === 0 &&
-            destinationResults.regions.length === 0 &&
-            destinationResults.cities.length === 0 &&
-            destinationResults.places.length === 0 &&
-            (destinationQuery.trim() === "" ? (
-              <p className="px-2 py-2 text-xs text-slate-400">Start typing to search.</p>
-            ) : (
-              <p className="px-2 py-2 text-xs text-slate-400">No matches found</p>
-            ))}
-
-          {(
-            [
-              { key: "countries", label: "Countries", items: destinationResults.countries },
-              { key: "regions", label: "Continents / Regions", items: destinationResults.regions },
-              { key: "cities", label: "Cities / Specific Destinations", items: destinationResults.cities },
-              { key: "places", label: "Natural Features & Places", items: destinationResults.places },
-            ] as const
-          ).map(
-            ({ key, label, items }) =>
-              items.length > 0 && (
-                <div key={key}>
-                  <p className="mt-2 px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                    {label}
-                  </p>
-                  {items.map((d) => (
-                    <button
-                      key={destinationKey(d)}
-                      type="button"
-                      onClick={() => toggleSelectedDestination(d)}
-                      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition ${
-                        selectedDestinations.some((s) => destinationKey(s) === destinationKey(d))
-                          ? "bg-orange-50 font-semibold text-orange-600"
-                          : "text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      {d.name}
-                      {d.type === "city" ? `, ${d.countryName}` : ""}
-                    </button>
-                  ))}
-                </div>
-              ),
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 border-t border-slate-100 p-3">
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedDestinations([]);
-              setOpenHeroField(null);
-            }}
-            className="flex-1 rounded-xl bg-slate-100 py-2 text-xs font-semibold text-slate-700 transition active:bg-slate-200"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            onClick={() => setOpenHeroField(null)}
-            className="flex-1 rounded-xl bg-orange-500 py-2 text-xs font-semibold text-white transition active:scale-[0.98] active:bg-orange-600"
-          >
-            Apply
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Avatar + [My Profile, Log out] dropdown. Shared by the feed header and the hero, so
-  // tapping the avatar behaves identically on both surfaces (the hero used to jump
-  // straight to /profile). Only one of the two is mounted at a time (hasSearched), so
-  // they can safely share showProfileMenu / profileMenuRef.
-  function renderProfileMenu(size: "sm" | "lg") {
-    if (!currentUser) return null;
-    const avatarSize = size === "lg" ? "h-10 w-10 text-sm" : "h-9 w-9 text-xs";
-    return (
-      <div ref={profileMenuRef} className="relative">
-        <button
-          type="button"
-          aria-label="Profile"
-          aria-haspopup="menu"
-          aria-expanded={showProfileMenu}
-          onClick={() => setShowProfileMenu((v) => !v)}
-          className={`flex items-center justify-center overflow-hidden rounded-full bg-slate-100 font-bold text-slate-600 transition active:scale-95 active:bg-slate-200 ${avatarSize}`}
-        >
-          <Avatar url={currentUser.avatarUrl} initials={currentUser.avatar} className={avatarSize} />
-        </button>
-
-        {showProfileMenu && (
-          <div
-            role="menu"
-            className="absolute right-0 z-50 mt-2 w-48 overflow-hidden rounded-2xl border border-slate-200 bg-white py-1 text-left shadow-lg"
-          >
-            <div className="border-b border-slate-100 px-3 py-2">
-              <p className="truncate text-sm font-semibold text-slate-900">{currentUser.name}</p>
-            </div>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setShowProfileMenu(false);
-                router.push("/profile");
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-50"
-            >
-              <IconUser className="h-4 w-4 text-slate-400" />
-              My Profile
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                logout();
-                setShowProfileMenu(false);
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 transition hover:bg-rose-50"
-            >
-              <IconLogOut className="h-4 w-4" />
-              Log out
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function renderDatesPanel() {
-    if (openHeroField !== "dates") return null;
-    return (
-      <div className="absolute inset-x-4 z-50 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-        <div className="flex gap-1 border-b border-slate-100 p-1.5">
-          <button
-            type="button"
-            onClick={() => setDateSearchDraft((d) => ({ ...d, mode: "specific" }))}
-            className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
-              dateSearchDraft.mode === "specific" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            Specific Dates
-          </button>
-          <button
-            type="button"
-            onClick={() => setDateSearchDraft((d) => ({ ...d, mode: "flexible" }))}
-            className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
-              dateSearchDraft.mode === "flexible" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            Flexible Dates
-          </button>
-        </div>
-
-        <div className="overflow-hidden p-3">
-          {dateSearchDraft.mode === "specific" ? (
-            <CalendarRangePicker
-              months={1}
-              startDate={dateSearchDraft.startDate}
-              endDate={dateSearchDraft.endDate}
-              onChange={(range) => {
-                const next = { ...dateSearchDraft, ...range };
-                setDateSearchDraft(next);
-                if (range.startDate && range.endDate) {
-                  setAppliedDateSearch(next);
-                  setOpenHeroField(null);
-                }
-              }}
-            />
-          ) : (
-            <MonthCarousel
-              months={monthOptions}
-              selected={dateSearchDraft.months}
-              formatMonth={formatMonth}
-              currentMonth={currentMonthKey()}
-              onToggle={(month) =>
-                setDateSearchDraft((d) => ({
-                  ...d,
-                  months: d.months.includes(month) ? d.months.filter((m) => m !== month) : [...d.months, month],
-                }))
-              }
-            />
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 border-t border-slate-100 p-3">
-          <button
-            type="button"
-            onClick={() => {
-              setDateSearchDraft(EMPTY_DATE_SEARCH);
-              setAppliedDateSearch(null);
-              setOpenHeroField(null);
-            }}
-            className="flex-1 rounded-xl bg-slate-100 py-2 text-xs font-semibold text-slate-700 transition active:bg-slate-200"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const hasContent =
-                dateSearchDraft.mode === "specific"
-                  ? Boolean(dateSearchDraft.startDate && dateSearchDraft.endDate)
-                  : dateSearchDraft.months.length > 0;
-              setAppliedDateSearch(hasContent ? dateSearchDraft : null);
-              setOpenHeroField(null);
-            }}
-            className="flex-1 rounded-xl bg-orange-500 py-2 text-xs font-semibold text-white transition active:scale-[0.98] active:bg-orange-600"
-          >
-            Apply
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-dvh bg-slate-50 text-slate-900">
       {/* Top Navigation Bar — only shown once the user has searched; first-run keeps just
@@ -1706,7 +1439,15 @@ function HomePageContent() {
                   </button>
                 </div>
               )}
-              {renderProfileMenu("sm")}
+              <ProfileMenu
+                size="sm"
+                currentUser={currentUser}
+                showProfileMenu={showProfileMenu}
+                setShowProfileMenu={setShowProfileMenu}
+                profileMenuRef={profileMenuRef}
+                router={router}
+                logout={logout}
+              />
             </div>
           </div>
 
@@ -1734,8 +1475,28 @@ function HomePageContent() {
               </button>
             </div>
 
-            {renderDestinationPanel()}
-            {renderDatesPanel()}
+            <DestinationPanel
+              isOpen={openHeroField === "destination"}
+              selectedDestinations={selectedDestinations}
+              setSelectedDestinations={setSelectedDestinations}
+              destinationQuery={destinationQuery}
+              setDestinationQuery={setDestinationQuery}
+              destinationResults={destinationResults}
+              destinationKey={destinationKey}
+              toggleSelectedDestination={toggleSelectedDestination}
+              setOpenHeroField={setOpenHeroField}
+            />
+            <DatesPanel
+              isOpen={openHeroField === "dates"}
+              dateSearchDraft={dateSearchDraft}
+              setDateSearchDraft={setDateSearchDraft}
+              setAppliedDateSearch={setAppliedDateSearch}
+              setOpenHeroField={setOpenHeroField}
+              monthOptions={monthOptions}
+              formatMonth={formatMonth}
+              currentMonthKey={currentMonthKey}
+              emptyDateSearch={EMPTY_DATE_SEARCH}
+            />
 
             {/* "More filters" as an inline row pushing content down, rather than a
                 floating dropdown — merges the trip-style filter in alongside gender
@@ -1837,7 +1598,15 @@ function HomePageContent() {
           <div className="relative flex min-h-[70vh] flex-col items-center justify-center gap-6 text-center">
             <div className="absolute inset-x-0 top-0 flex items-center justify-end gap-2">
               {currentUser ? (
-                renderProfileMenu("lg")
+                <ProfileMenu
+                  size="lg"
+                  currentUser={currentUser}
+                  showProfileMenu={showProfileMenu}
+                  setShowProfileMenu={setShowProfileMenu}
+                  profileMenuRef={profileMenuRef}
+                  router={router}
+                  logout={logout}
+                />
               ) : (
                 <>
                   <button
@@ -1877,8 +1646,29 @@ function HomePageContent() {
                 {renderDatesTrigger("lg")}
               </div>
 
-              {renderDestinationPanel(heroDestinationRowHeight)}
-              {renderDatesPanel()}
+              <DestinationPanel
+                isOpen={openHeroField === "destination"}
+                topOffsetPx={heroDestinationRowHeight}
+                selectedDestinations={selectedDestinations}
+                setSelectedDestinations={setSelectedDestinations}
+                destinationQuery={destinationQuery}
+                setDestinationQuery={setDestinationQuery}
+                destinationResults={destinationResults}
+                destinationKey={destinationKey}
+                toggleSelectedDestination={toggleSelectedDestination}
+                setOpenHeroField={setOpenHeroField}
+              />
+              <DatesPanel
+                isOpen={openHeroField === "dates"}
+                dateSearchDraft={dateSearchDraft}
+                setDateSearchDraft={setDateSearchDraft}
+                setAppliedDateSearch={setAppliedDateSearch}
+                setOpenHeroField={setOpenHeroField}
+                monthOptions={monthOptions}
+                formatMonth={formatMonth}
+                currentMonthKey={currentMonthKey}
+                emptyDateSearch={EMPTY_DATE_SEARCH}
+              />
             </div>
 
             <button
