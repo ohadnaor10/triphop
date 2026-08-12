@@ -24,9 +24,11 @@ import {
 import type { FeedMapPoint, FeedMapPost } from "./components/TripMap";
 import Avatar from "./components/Avatar";
 import Combobox from "./components/Combobox";
+import CreatePostModal from "./components/CreatePostModal";
 import DateSearchFields from "./components/DateSearchFields";
 import DatesPanel from "./components/DatesPanel";
 import DestinationPanel from "./components/DestinationPanel";
+import { PostDetailView, UserProfileOverlay } from "./components/PostDetailView";
 import ProfileMenu from "./components/ProfileMenu";
 import { getPopularDestinations } from "./data/popularDestinations";
 import {
@@ -384,7 +386,7 @@ function initials(name: string) {
 
 // ---------- Form state ----------
 
-type DestinationEntry =
+export type DestinationEntry =
   | { kind: "country"; country: string; countryCode: string; cities: string[] }
   | { kind: "region"; region: Region };
 
@@ -431,7 +433,7 @@ function toSearchInput(search: DateSearchUI): DateSearchInput {
   return { mode: "flexible", months: search.months };
 }
 
-type FormState = {
+export type FormState = {
   destinations: DestinationEntry[];
   dates: DateSearchUI;
   vibes: TripVibe[];
@@ -1900,580 +1902,83 @@ function HomePageContent() {
       )}
 
       {/* Create Post Modal (slide-over) */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[1200] flex items-end justify-center sm:items-center">
-          <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
-
-          <div className="relative z-10 flex h-[100dvh] w-full flex-col overflow-hidden bg-slate-900 sm:h-[85dvh] sm:max-w-lg sm:rounded-3xl sm:shadow-2xl">
-            <form onSubmit={handleSubmit} className="flex h-full flex-col">
-              {/* Step header: back/close + progress dots */}
-              <div className="flex items-center gap-3 px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-3 sm:pt-4">
-                <button
-                  type="button"
-                  onClick={() =>
-                    postStep === 0
-                      ? setIsModalOpen(false)
-                      : withViewTransition(() => setPostStep((s) => (s - 1) as 0 | 1 | 2))
-                  }
-                  aria-label={postStep === 0 ? "Close" : "Back"}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition active:scale-95 active:bg-white/20"
-                >
-                  {postStep === 0 ? <IconX className="h-4 w-4" /> : <IconChevronLeft className="h-4 w-4" />}
-                </button>
-                <div className="flex flex-1 gap-1.5">
-                  {[0, 1, 2].map((i) => (
-                    <div
-                      key={i}
-                      className={`h-1 flex-1 rounded-full transition ${i <= postStep ? "bg-orange-500" : "bg-white/15"}`}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Step content */}
-              <div className="flex-1 overflow-y-auto px-4 pb-4">
-                {postStep === 0 && (
-                  <div className="flex flex-col gap-4">
-                    <div>
-                      <h2 className="text-lg font-bold text-white">Where are you going?</h2>
-                      <p className="text-xs text-slate-400">Search countries or regions — pick as many as you like.</p>
-                    </div>
-
-                    <div className="relative">
-                      <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <input
-                        type="text"
-                        value={postDestQuery}
-                        onChange={(e) => setPostDestQuery(e.target.value)}
-                        placeholder="Search countries or regions…"
-                        className="w-full rounded-2xl border border-white/10 bg-white/10 py-2.5 pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-400 focus:border-orange-400/60 focus:ring-2 focus:ring-orange-400/30"
-                      />
-                    </div>
-
-                    {postDestinationCards.length === 0 ? (
-                      <p className="text-center text-sm text-slate-400">No matches found</p>
-                    ) : (
-                      <div className="flex flex-col gap-1">
-                        {postDestinationCards.map((d) => (
-                          <button
-                            key={`${d.type}:${d.type === "country" ? d.code : d.name}`}
-                            type="button"
-                            onClick={() => toggleDestinationChoice(d)}
-                            className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
-                              isDestinationChosen(d)
-                                ? "bg-orange-500/20 text-orange-300 ring-1 ring-inset ring-orange-400/40"
-                                : "text-slate-200 hover:bg-white/10"
-                            }`}
-                          >
-                            {d.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {form.destinations.map((entry, index) => {
-                      const key = entry.kind === "country" ? `country:${entry.countryCode}` : `region:${entry.region}`;
-                      const label = entry.kind === "country" ? entry.country : entry.region;
-                      return (
-                        <div key={key} className="rounded-xl bg-white/5 ring-1 ring-inset ring-white/10">
-                          <div className="flex items-center justify-between px-3 py-2">
-                            <span className="text-sm font-medium text-white">{label}</span>
-                            <button
-                              type="button"
-                              onClick={() => removeDestinationEntry(index)}
-                              aria-label={`Remove ${label}`}
-                              className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white"
-                            >
-                              <IconX className="h-3 w-3" />
-                            </button>
-                          </div>
-
-                          {entry.kind === "country" &&
-                            (() => {
-                              const { cityOptions } = citiesOptionsFor(entry);
-                              return (
-                                <div className="border-t border-white/10 px-3 pb-3 pt-2">
-                                  <Combobox
-                                    options={cityOptions}
-                                    onSelect={(opt) => addEntryCity(index, opt.value)}
-                                    placeholder={`Add specific places in ${entry.country}…`}
-                                    emptyMessage="No matching cities"
-                                  />
-
-                                  {entry.cities.length > 0 && (
-                                    <div className="mt-2 flex flex-wrap gap-1.5">
-                                      {entry.cities.map((city) => (
-                                        <span
-                                          key={city}
-                                          className="flex items-center gap-1 rounded-full bg-white/10 py-1 pl-2.5 pr-1.5 text-xs font-medium text-white"
-                                        >
-                                          {city}
-                                          <button
-                                            type="button"
-                                            onClick={() => toggleEntryCity(index, city)}
-                                            aria-label={`Remove ${city}`}
-                                            className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-white/20"
-                                          >
-                                            <IconX className="h-2.5 w-2.5" />
-                                          </button>
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })()}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {postStep === 1 && (
-                  <div className="flex flex-col gap-4">
-                    <div className="rounded-xl bg-white/5 px-3 py-2 ring-1 ring-inset ring-white/10">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Destination</p>
-                      <p className="line-clamp-2 text-sm font-medium text-white">
-                        {getDestinationEntriesSummary(form.destinations)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <h2 className="text-lg font-bold text-white">When&apos;s the trip?</h2>
-                      <p className="text-xs text-slate-400">Give travelers a sense of your timing.</p>
-                    </div>
-                    <DateSearchFields
-                      draft={form.dates}
-                      onDraftChange={(updater) => setForm((p) => ({ ...p, dates: updater(p.dates) }))}
-                      monthOptions={monthOptions}
-                      currentMonth={currentMonthKey()}
-                      formatMonth={formatMonth}
-                    />
-                  </div>
-                )}
-
-                {postStep === 2 && (
-                  <div className="flex flex-col gap-5">
-                    <div className="flex flex-col gap-2 rounded-xl bg-white/5 px-3 py-2 ring-1 ring-inset ring-white/10">
-                      <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Destination</p>
-                        <p className="line-clamp-2 text-sm font-medium text-white">
-                          {getDestinationEntriesSummary(form.destinations)}
-                        </p>
-                      </div>
-                      <div className="border-t border-white/10 pt-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Dates</p>
-                        <p className="line-clamp-2 text-sm font-medium text-white">{getDateSearchLabel(form.dates)}</p>
-                      </div>
-                    </div>
-
-                    <div>
-                      <h2 className="text-lg font-bold text-white">Add some style</h2>
-                      <p className="text-xs text-slate-400">Optional finishing touches.</p>
-                    </div>
-
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-300">
-                        Trip style / vibe (optional)
-                      </label>
-                      <div className="flex flex-wrap gap-2">
-                        {TRIP_STYLES.map((vibe) => (
-                          <button
-                            key={vibe}
-                            type="button"
-                            onClick={() => toggleFormVibe(vibe)}
-                            className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${
-                              form.vibes.includes(vibe)
-                                ? "bg-orange-500 text-white ring-orange-500"
-                                : "bg-white/10 text-slate-200 ring-white/20 hover:bg-white/20"
-                            }`}
-                          >
-                            {vibe}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-300">Bio / description</label>
-                      <textarea
-                        value={form.bio}
-                        onChange={(e) => setForm((p) => ({ ...p, bio: e.target.value }))}
-                        placeholder="Tell potential travel partners about your plans, pace, and what you're looking for..."
-                        rows={4}
-                        className="w-full resize-none rounded-xl border border-white/20 bg-white/10 px-3 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-orange-400 focus:ring-2 focus:ring-orange-400/30"
-                      />
-                    </div>
-
-                    <div className="rounded-xl bg-white/5 p-3 ring-1 ring-inset ring-white/10">
-                      <label className="flex cursor-pointer items-start gap-2.5">
-                        <input
-                          type="checkbox"
-                          checked={form.shareContact}
-                          onChange={(e) => setForm((p) => ({ ...p, shareContact: e.target.checked }))}
-                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-white/30 bg-white/10 accent-emerald-500"
-                        />
-                        <span className="flex items-center gap-1.5 text-sm font-medium text-white">
-                          <IconWhatsApp className="h-3.5 w-3.5 text-emerald-400" />
-                          Share my WhatsApp number on this post
-                        </span>
-                      </label>
-
-                      {form.shareContact && !myWhatsapp && (
-                        <div className="mt-2.5 border-t border-white/10 pt-2.5">
-                          <label className="mb-1 block text-xs font-medium text-slate-300">
-                            You haven&apos;t added a number yet — enter one to share it here
-                          </label>
-                          <input
-                            type="tel"
-                            value={form.contactDraft}
-                            onChange={(e) => setForm((p) => ({ ...p, contactDraft: e.target.value }))}
-                            placeholder="e.g. +1 555 000 1111"
-                            className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-400 focus:border-orange-400 focus:ring-2 focus:ring-orange-400/30"
-                          />
-                          <p className="mt-1 text-[11px] text-slate-400">
-                            Saved to your profile too, so you won&apos;t need to enter it again next time.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Step footer */}
-              <div className="border-t border-white/10 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
-                {postStep === 2 && postError && (
-                  <p className="mb-2 rounded-xl bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300">
-                    {postError}
-                  </p>
-                )}
-                {postStep < 2 ? (
-                  <button
-                    type="button"
-                    disabled={!isPostStepValid(postStep)}
-                    onClick={() => withViewTransition(() => setPostStep((s) => (s + 1) as 0 | 1 | 2))}
-                    className="w-full rounded-2xl bg-orange-500 py-3 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-orange-600 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500"
-                  >
-                    Next
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={!isFormValid() || isSavingPost}
-                    className="w-full rounded-2xl bg-orange-500 py-3 text-sm font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-orange-600 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500"
-                  >
-                    {isSavingPost ? "Saving…" : editingPostId ? "Save changes" : "Post trip"}
-                  </button>
-                )}
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CreatePostModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        editingPostId={editingPostId}
+        postStep={postStep}
+        setPostStep={setPostStep}
+        withViewTransition={withViewTransition}
+        handleSubmit={handleSubmit}
+        form={form}
+        setForm={setForm}
+        postDestQuery={postDestQuery}
+        setPostDestQuery={setPostDestQuery}
+        postDestinationCards={postDestinationCards}
+        isDestinationChosen={isDestinationChosen}
+        toggleDestinationChoice={toggleDestinationChoice}
+        removeDestinationEntry={removeDestinationEntry}
+        citiesOptionsFor={citiesOptionsFor}
+        addEntryCity={addEntryCity}
+        toggleEntryCity={toggleEntryCity}
+        getDestinationEntriesSummary={getDestinationEntriesSummary}
+        monthOptions={monthOptions}
+        currentMonthKey={currentMonthKey}
+        formatMonth={formatMonth}
+        getDateSearchLabel={getDateSearchLabel}
+        toggleFormVibe={toggleFormVibe}
+        tripStyles={TRIP_STYLES}
+        myWhatsapp={myWhatsapp}
+        isPostStepValid={isPostStepValid}
+        isFormValid={isFormValid}
+        isSavingPost={isSavingPost}
+        postError={postError}
+      />
 
       {/* Full-screen Post Detail View */}
       {viewPost && (
-        <div className="fixed inset-0 z-[1200] flex justify-center bg-white sm:items-center sm:bg-slate-900/40 sm:p-4">
-          <div className="flex h-full w-full max-w-lg flex-col overflow-y-auto bg-white sm:h-auto sm:max-h-[90dvh] sm:rounded-3xl sm:shadow-2xl">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/90 px-4 py-3 backdrop-blur-md">
-              <h2 className="text-sm font-bold text-slate-900">Trip details</h2>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsTripMapOpen(true)}
-                  className="flex items-center gap-1.5 rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition active:scale-95"
-                >
-                  <IconMap className="h-3.5 w-3.5" />
-                  Show Trip Map
-                </button>
-                {currentUser && viewPost.userId === currentUser.id && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => startEditPost(viewPost)}
-                      aria-label="Edit trip"
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:text-slate-900 active:scale-90"
-                    >
-                      <IconEdit className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (window.confirm("Delete this trip post?")) deletePost(viewPost.id);
-                      }}
-                      aria-label="Delete trip"
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:text-rose-600 active:scale-90"
-                    >
-                      <IconTrash className="h-4 w-4" />
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  onClick={() => toggleSavedPost(viewPost.id)}
-                  aria-label={savedPostIds.has(viewPost.id) ? "Remove from saved" : "Save trip"}
-                  aria-pressed={savedPostIds.has(viewPost.id)}
-                  className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-90 ${
-                    savedPostIds.has(viewPost.id)
-                      ? "bg-rose-500 text-white"
-                      : "bg-slate-100 text-slate-500 hover:text-rose-500"
-                  }`}
-                >
-                  <IconHeart className="h-4 w-4" filled={savedPostIds.has(viewPost.id)} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setViewPostId(null);
-                    setIsTripMapOpen(false);
-                  }}
-                  aria-label="Close"
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition active:bg-slate-200"
-                >
-                  <IconX className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 px-5 py-5">
-              {/* Destination — wrapped chips rather than one heading, so posts with many
-                  countries/regions read as a scannable list instead of a wall of text. */}
-              <div className="flex items-start gap-2">
-                <IconMapPin className="mt-1 h-5 w-5 shrink-0 text-orange-500" />
-                <div className="flex flex-wrap gap-1.5">
-                  {viewPostDestinationChips?.chips.map((chip, i) => (
-                    <span
-                      key={i}
-                      className="max-w-full truncate rounded-full bg-orange-50 px-3 py-1 text-sm font-bold text-orange-700 ring-1 ring-inset ring-orange-600/20"
-                    >
-                      {chip}
-                    </span>
-                  ))}
-                  {!!viewPostDestinationChips?.moreCount && (
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-500">
-                      +{viewPostDestinationChips.moreCount} more
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Dates */}
-              <div className="mt-2 flex items-center gap-1.5 pl-[26px] text-base font-medium text-slate-600">
-                <IconCalendar className="h-4 w-4 shrink-0 text-slate-400" />
-                {getDateLabel(viewPost.date)}
-              </div>
-
-              {viewPost.createdAt && (
-                <p className="mt-1 pl-[26px] text-xs text-slate-400">
-                  Posted {formatRelativeTime(viewPost.createdAt)}
-                </p>
-              )}
-
-              {/* User info */}
-              <button
-                type="button"
-                onClick={() => goToUserProfile(viewPost.userId)}
-                className="mt-5 flex w-full items-center gap-3 rounded-2xl bg-slate-50 p-3 text-left transition hover:bg-slate-100 active:scale-[0.99]"
-              >
-                <Avatar
-                  url={viewPost.user.avatarUrl}
-                  initials={initials(viewPost.user.name)}
-                  colorClass={viewPost.user.avatarColor}
-                  className="h-12 w-12 text-base"
-                />
-                <div className="min-w-0">
-                  <p className="text-sm text-slate-700">
-                    <span className="font-semibold text-slate-900">{viewPost.user.name}</span>
-                    {" · "}
-                    {viewPost.user.age}
-                    {" · "}
-                    {formatGender(viewPost.user.gender)}
-                  </p>
-                  {viewPost.user.about && (
-                    <p className="mt-0.5 text-xs italic text-slate-500">&ldquo;{viewPost.user.about}&rdquo;</p>
-                  )}
-                </div>
-              </button>
-
-              {/* Vibe tags */}
-              <div className="mt-4 flex flex-wrap gap-1.5">
-                {viewPost.vibes.map((vibe) => (
-                  <span
-                    key={vibe}
-                    className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${VIBE_STYLES[vibe]}`}
-                  >
-                    {vibe}
-                  </span>
-                ))}
-              </div>
-
-              {/* Description */}
-              <p className="mt-4 whitespace-pre-line text-sm leading-relaxed text-slate-600">{viewPost.bio}</p>
-            </div>
-
-            {viewPost.userId !== currentUser?.id && (
-              <div className="sticky bottom-0 flex items-center gap-2 border-t border-slate-100 bg-white p-4">
-                <button
-                  type="button"
-                  onClick={() => requireAuth(() => router.push(`/messages/${viewPost.userId}`))}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-slate-800"
-                >
-                  <IconMessageCircle className="h-4 w-4" />
-                  Message
-                </button>
-
-                {viewPost.shareContact &&
-                  (revealedContact ? (
-                    <a
-                      href={revealedContact}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
-                    >
-                      <IconWhatsApp className="h-4 w-4" />
-                      WhatsApp
-                    </a>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        requireAuth(() => {
-                          revealContact(viewPost.id).then((contact) => setRevealedContact(contact));
-                        })
-                      }
-                      className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition active:scale-[0.98] active:bg-emerald-600"
-                    >
-                      <IconWhatsApp className="h-4 w-4" />
-                      {currentUser ? "WhatsApp" : "Log in"}
-                    </button>
-                  ))}
-              </div>
-            )}
-          </div>
-        </div>
+        <PostDetailView
+          viewPost={viewPost}
+          viewPostDestinationChips={viewPostDestinationChips}
+          currentUser={currentUser}
+          requireAuth={requireAuth}
+          router={router}
+          savedPostIds={savedPostIds}
+          toggleSavedPost={toggleSavedPost}
+          startEditPost={startEditPost}
+          deletePost={deletePost}
+          goToUserProfile={goToUserProfile}
+          revealedContact={revealedContact}
+          revealContact={revealContact}
+          setRevealedContact={setRevealedContact}
+          onClose={() => setViewPostId(null)}
+          isTripMapOpen={isTripMapOpen}
+          setIsTripMapOpen={setIsTripMapOpen}
+          tripMapPoints={tripMapPoints}
+          vibeStyles={VIBE_STYLES}
+          initials={initials}
+          formatGender={formatGender}
+          formatRelativeTime={formatRelativeTime}
+          getDateLabel={getDateLabel}
+          getDestinationLabel={getDestinationLabel}
+        />
       )}
 
-      {/* User Profile overlay — sits above the Post Detail View (z-[1200]) so opening a
-          profile from within a post's user-info block layers on top rather than
-          replacing it; closing this reveals whatever was open underneath untouched. */}
       {viewUserId && (
-        <div className="fixed inset-0 z-[1250] flex justify-center bg-white sm:items-center sm:bg-slate-900/40 sm:p-4">
-          <div className="flex h-full w-full max-w-lg flex-col overflow-y-auto bg-white sm:h-auto sm:max-h-[90dvh] sm:rounded-3xl sm:shadow-2xl">
-            <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-slate-100 bg-white/90 px-4 py-3 backdrop-blur-md">
-              <button
-                type="button"
-                onClick={() => setViewUserId(null)}
-                aria-label="Back"
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition active:scale-95 active:bg-slate-200"
-              >
-                <IconChevronLeft className="h-4 w-4" />
-              </button>
-              <h2 className="text-sm font-bold text-slate-900">Profile</h2>
-            </div>
-
-            <div className="flex-1 px-5 py-5">
-              {viewedProfileLoading ? (
-                <p className="text-sm text-slate-400">Loading…</p>
-              ) : !viewedProfile ? (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-sm text-slate-500">
-                  This traveler couldn&apos;t be found.
-                </div>
-              ) : (
-                <>
-                  <div className="flex flex-col items-center gap-3 text-center">
-                    <Avatar
-                      url={viewedProfile.avatarUrl}
-                      initials={initials(viewedProfile.name)}
-                      colorClass={viewedProfile.avatarColor ?? undefined}
-                      className="h-20 w-20 text-2xl"
-                    />
-                    <div>
-                      <p className="text-lg font-bold text-slate-900">{viewedProfile.name}</p>
-                      {(viewedProfile.age !== null || viewedProfile.gender) && (
-                        <p className="text-sm text-slate-500">
-                          {[viewedProfile.age, viewedProfile.gender ? formatGender(viewedProfile.gender) : null]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </p>
-                      )}
-                    </div>
-                    {viewedProfile.about && (
-                      <p className="text-sm italic leading-relaxed text-slate-600">&ldquo;{viewedProfile.about}&rdquo;</p>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => requireAuth(() => router.push(`/messages/${viewUserId}`))}
-                      className="mt-1 flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition active:scale-95 active:bg-slate-800"
-                    >
-                      <IconMessageCircle className="h-4 w-4" />
-                      Message
-                    </button>
-                  </div>
-
-                  <div className="mt-6">
-                    <h3 className="px-1 text-sm font-bold text-slate-900">
-                      {viewedProfile.name.split(" ")[0]}&apos;s posts
-                    </h3>
-                    <div className="mt-2 flex flex-col gap-3">
-                      {viewedUserPosts.length === 0 && (
-                        <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500">
-                          No trips posted yet.
-                        </div>
-                      )}
-                      {viewedUserPosts.map((post) => (
-                        <button
-                          key={post.id}
-                          type="button"
-                          onClick={() => {
-                            setViewUserId(null);
-                            setViewPostId(post.id);
-                          }}
-                          className="rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-200 transition hover:shadow-md active:scale-[0.99]"
-                        >
-                          <div className="flex min-w-0 items-start gap-1.5">
-                            <IconMapPin className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
-                            <h4 className="min-w-0 truncate text-sm font-bold text-slate-900">
-                              {getDestinationLabel(post.destinations)}
-                            </h4>
-                          </div>
-                          <div className="mt-1 flex items-center gap-1.5 pl-[22px] text-xs text-slate-500">
-                            <IconCalendar className="h-3.5 w-3.5 shrink-0" />
-                            {getDateLabel(post.date, true)}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Trip Map modal */}
-      {viewPost && isTripMapOpen && (
-        <div className="fixed inset-0 z-[1300] flex flex-col bg-white sm:items-center sm:justify-center sm:bg-slate-900/40 sm:p-4">
-          <div className="flex h-full w-full max-w-lg flex-col overflow-hidden bg-white sm:h-[80dvh] sm:rounded-3xl sm:shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-              <h2 className="min-w-0 truncate text-sm font-bold text-slate-900">
-                {getDestinationLabel(viewPost.destinations)}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsTripMapOpen(false)}
-                aria-label="Close map"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition active:bg-slate-200"
-              >
-                <IconX className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="relative flex-1">
-              <TripDestinationsMap points={tripMapPoints} />
-            </div>
-          </div>
-        </div>
+        <UserProfileOverlay
+          viewUserId={viewUserId}
+          setViewUserId={setViewUserId}
+          viewedProfile={viewedProfile}
+          viewedProfileLoading={viewedProfileLoading}
+          viewedUserPosts={viewedUserPosts}
+          setViewPostId={setViewPostId}
+          requireAuth={requireAuth}
+          router={router}
+          initials={initials}
+          formatGender={formatGender}
+          getDateLabel={getDateLabel}
+          getDestinationLabel={getDestinationLabel}
+        />
       )}
     </div>
   );
