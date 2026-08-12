@@ -28,7 +28,7 @@ export default function ProfileMenu({
   logout,
 }: ProfileMenuProps) {
   if (!currentUser) return null;
-  const avatarSize = size === "lg" ? "h-10 w-10 text-sm" : "h-9 w-9 text-xs";
+  const avatarSize = size === "lg" ? "h-10 w-10 text-sm" : "h-8 w-8 text-[10px]";
   return (
     <div ref={profileMenuRef} className="relative">
       <button

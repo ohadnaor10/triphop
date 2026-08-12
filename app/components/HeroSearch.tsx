@@ -353,22 +353,15 @@ function FullHeroSearch(props: FullVariantProps) {
             logout={logout}
           />
         ) : (
-          <>
-            <button
-              type="button"
-              onClick={() => router.push("/sign-in")}
-              className="rounded-full px-3.5 py-2 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-50 active:scale-95"
-            >
-              Log in
-            </button>
-            <button
-              type="button"
-              onClick={() => router.push("/sign-up")}
-              className="rounded-full bg-orange-500 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition active:scale-95 active:bg-orange-600"
-            >
-              Sign up
-            </button>
-          </>
+          // Single auth entry point (/sign-in handles new accounts too), sized to match
+          // the avatar pill it replaces once the user is logged in.
+          <button
+            type="button"
+            onClick={() => router.push("/sign-in")}
+            className="flex h-10 items-center rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition active:scale-95 active:bg-slate-200"
+          >
+            Log in
+          </button>
         )}
       </div>
       <h1 style={{ viewTransitionName: "logo" }} className="text-5xl font-extrabold tracking-tight text-slate-900">
