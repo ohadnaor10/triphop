@@ -31,7 +31,7 @@ import { hasActiveDateSearch, type DateSearchInput } from "./lib/relevance";
 import { useAuth } from "./context/AuthContext";
 import { useUnreadMessageCount } from "./lib/messagesStore";
 import { clusterLocations } from "./lib/cluster";
-import { useFocusedMapPost, useFocusedPostPlaces, useMapPoints, type MapViewport } from "./lib/mapStore";
+import { useFocusedPostPlaces, useMapPoints, usePostById, type MapViewport } from "./lib/mapStore";
 import { usePostsStore, type PostsFilters } from "./lib/postsStore";
 import { useClerkSupabaseClient } from "./lib/supabase/useClerkSupabaseClient";
 
@@ -924,7 +924,10 @@ function HomePageContent() {
     loadMoreObserverRef.current.observe(node);
   }, []);
 
-  const viewPost = posts.find((p) => p.id === viewPostId) ?? null;
+  // Not a plain lookup in `posts`: the feed holds only the pages that have been scrolled
+  // into, while a post opened from the map can be any post in the viewport. Falling back
+  // to a fetch is what makes the map's preview card actually open its post.
+  const viewPost = usePostById(viewPostId, posts);
   const viewPostDestinationChips = useMemo(
     () => (viewPost ? getDestinationChips(viewPost.destinations) : null),
     [viewPost],
@@ -1133,7 +1136,7 @@ function HomePageContent() {
     }
     return clusterLocations(mapLocations, mapViewport?.zoom ?? 2);
   }, [mapLocations, mapOverview, mapViewport?.zoom]);
-  const focusedMapPost = useFocusedMapPost(focusedMapPostId, posts);
+  const focusedMapPost = usePostById(focusedMapPostId, posts);
   // Fetched rather than filtered from the loaded set: a trip's other cities are usually
   // off-screen, which is exactly why focusing has to reframe the camera around them.
   const focusedMapPlaces = useFocusedPostPlaces(focusedMapPostId);

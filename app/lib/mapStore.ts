@@ -295,14 +295,13 @@ type PostRow = {
   } | null;
 };
 
-// The post behind a tapped pin, fetched on demand.
+// One post by id, from memory if the feed already has it and from the database if not.
 //
-// The map no longer carries full post payloads — it ships only coordinates, which is what
-// keeps a viewport's worth of pins cheap — so the details for the one post the user
-// actually tapped are fetched when they tap it. `loadedPosts` is checked first so a post
-// already in the feed's memory costs nothing, which also keeps this working in the
+// The map ships only coordinates — that is what keeps a viewport's worth of markers cheap
+// — so any post reached through the map has to be fetched when it is opened. Checking
+// `loadedPosts` first keeps feed interactions instant and keeps this working in the
 // mock-data mode where the RPCs don't exist.
-export function useFocusedMapPost(postId: string | null, loadedPosts: Post[]): Post | null {
+export function usePostById(postId: string | null, loadedPosts: Post[]): Post | null {
   const supabase = useClerkSupabaseClient();
   const [fetched, setFetched] = useState<Post | null>(null);
 
