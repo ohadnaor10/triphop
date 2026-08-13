@@ -135,6 +135,12 @@ function createBubbleElement(cluster: MapCluster): HTMLDivElement {
 }
 
 export type TripMapProps = {
+  /**
+   * False while the map is mounted but hidden (the feed is showing). A hidden container
+   * has zero size, so camera work has to wait, and Mapbox needs a resize once it is shown
+   * again.
+   */
+  isVisible: boolean;
   clusters: MapCluster[];
   focusedPostId: string | null;
   /**
@@ -152,6 +158,7 @@ export type TripMapProps = {
 };
 
 export default function TripMap({
+  isVisible,
   clusters,
   focusedPostId,
   focusedPlaces,
@@ -169,6 +176,9 @@ export default function TripMap({
   // Mapbox instance, which is both a visible flicker and a billed map load.
   const onSelectPostRef = useRef(onSelectPost);
   const onViewportChangeRef = useRef(onViewportChange);
+  // Lets the visibility effect below re-announce the viewport without duplicating the
+  // bounds-reading logic that lives inside the map-init effect.
+  const emitViewportRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     onSelectPostRef.current = onSelectPost;
     onViewportChangeRef.current = onViewportChange;
@@ -203,6 +213,7 @@ export default function TripMap({
         zoom: map.getZoom(),
       });
     };
+    emitViewportRef.current = emitViewport;
 
     map.on("load", () => {
       setIsStyleLoaded(true);
@@ -220,13 +231,25 @@ export default function TripMap({
     };
   }, []);
 
+  // Coming back from the feed. `display: none` collapses the container to zero size, and
+  // Mapbox caches the dimensions it was last laid out with, so without a resize the map
+  // returns stretched or blank. The viewport is re-announced afterwards so a filter
+  // changed while the map was hidden gets picked up — the coverage cache in mapStore
+  // makes that a no-op when nothing actually changed.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isStyleLoaded || !isVisible) return;
+    map.resize();
+    emitViewportRef.current?.();
+  }, [isVisible, isStyleLoaded]);
+
   // Opening camera for a newly-searched destination. Applied once per distinct bounds —
   // after that the user's own pan/zoom is left alone, since re-fitting on every render
   // would fight whatever they just did.
   const appliedBoundsRef = useRef<string | null>(null);
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !isStyleLoaded || !initialBounds) return;
+    if (!map || !isStyleLoaded || !isVisible || !initialBounds) return;
     const key = initialBounds.join(",");
     if (appliedBoundsRef.current === key) return;
     appliedBoundsRef.current = key;
@@ -238,7 +261,7 @@ export default function TripMap({
       ],
       { padding: 40, maxZoom: 9, duration: 800, essential: true },
     );
-  }, [initialBounds, isStyleLoaded]);
+  }, [initialBounds, isStyleLoaded, isVisible]);
 
   useEffect(() => {
     const map = mapRef.current;

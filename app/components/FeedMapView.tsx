@@ -13,6 +13,8 @@ const TripMap = dynamic(() => import("./TripMap"), {
 });
 
 export type FeedMapViewProps = {
+  /** False while the map is mounted but hidden behind the feed — see page.tsx. */
+  isVisible: boolean;
   clusters: MapCluster[];
   /** Total posts matching the filters, ignoring the viewport. */
   totalCount: number;
@@ -34,6 +36,7 @@ export type FeedMapViewProps = {
 };
 
 export function FeedMapView({
+  isVisible,
   clusters,
   totalCount,
   overviewMode,
@@ -63,6 +66,7 @@ export function FeedMapView({
 
       <div className="relative h-[420px] overflow-hidden rounded-2xl border border-slate-200">
         <TripMap
+          isVisible={isVisible}
           clusters={clusters}
           focusedPostId={focusedMapPostId}
           focusedPlaces={focusedPlaces}

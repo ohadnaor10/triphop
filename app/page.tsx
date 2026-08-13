@@ -698,6 +698,12 @@ function HomePageContent() {
   const feedScrollBeforeMapRef = useRef<number | null>(null);
   function switchToMapView() {
     if (view === "feed") feedScrollBeforeMapRef.current = window.scrollY;
+    // Latches on first use and never resets: from here on the map stays mounted (hidden
+    // behind the feed) rather than being torn down on every toggle. Mapbox bills a map
+    // *load* per initialisation, so a user flipping between views ten times used to cost
+    // ten of them. Latching rather than mounting upfront keeps the cost at zero for
+    // visitors who never open the map at all.
+    setHasOpenedMap(true);
     setView("map");
   }
   function switchToFeedView() {
@@ -1093,6 +1099,11 @@ function HomePageContent() {
   // meant the map's contents depended on how far the user had scrolled the feed first.
   const [mapViewport, setMapViewport] = useState<MapViewport | null>(null);
   const [focusedMapPostId, setFocusedMapPostId] = useState<string | null>(null);
+  // See switchToMapView: once true, the map stays mounted for the rest of the session.
+  // Seeded from the restored view, not just from switchToMapView: returning from /profile
+  // or /messages restores view === "map" directly, and a false start here would leave that
+  // session with nothing rendered at all.
+  const [hasOpenedMap, setHasOpenedMap] = useState(restoredFeedState?.view === "map");
   const { locations: mapLocations, overview: mapOverview, totalCount: mapTotalCount } = useMapPoints(
     filters,
     mapViewport,
@@ -1379,44 +1390,57 @@ function HomePageContent() {
             logout={logout}
             onSearch={() => withViewTransition(() => setHasSearched(true))}
           />
-        ) : view === "feed" ? (
-          <FeedList
-            posts={posts}
-            loading={loading}
-            hasMore={hasMore}
-            loadingMore={loadingMore}
-            loadMoreSentinelRef={loadMoreSentinelRef}
-            currentUser={currentUser}
-            savedPostIds={savedPostIds}
-            toggleSavedPost={toggleSavedPost}
-            startEditPost={startEditPost}
-            deletePost={deletePost}
-            setViewPostId={setViewPostId}
-            goToUserProfile={goToUserProfile}
-            vibeStyles={VIBE_STYLES}
-            initials={initials}
-            formatGender={formatGender}
-            getDateLabel={getDateLabel}
-            getDestinationLabel={getDestinationLabel}
-          />
         ) : (
-          <FeedMapView
-            clusters={mapClusters}
-            totalCount={mapTotalCount}
-            overviewMode={mapOverview !== null}
-            onViewportChange={setMapViewport}
-            initialBounds={mapInitialBounds}
-            focusedMapPostId={focusedMapPostId}
-            focusedPlaces={focusedMapPlaces}
-            focusedCountryCodes={focusedMapCountryCodes}
-            setFocusedMapPostId={setFocusedMapPostId}
-            focusedMapPost={focusedMapPost}
-            setViewPostId={setViewPostId}
-            goToUserProfile={goToUserProfile}
-            initials={initials}
-            getDateLabel={getDateLabel}
-            getDestinationLabel={getDestinationLabel}
-          />
+          <>
+            {view === "feed" && (
+              <FeedList
+                posts={posts}
+                loading={loading}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                loadMoreSentinelRef={loadMoreSentinelRef}
+                currentUser={currentUser}
+                savedPostIds={savedPostIds}
+                toggleSavedPost={toggleSavedPost}
+                startEditPost={startEditPost}
+                deletePost={deletePost}
+                setViewPostId={setViewPostId}
+                goToUserProfile={goToUserProfile}
+                vibeStyles={VIBE_STYLES}
+                initials={initials}
+                formatGender={formatGender}
+                getDateLabel={getDateLabel}
+                getDestinationLabel={getDestinationLabel}
+              />
+            )}
+
+            {/* Hidden rather than unmounted once it has been opened: tearing the map down
+                on every toggle rebuilds the Mapbox instance, and Mapbox bills per map
+                *load*. Keeping it mounted also preserves the camera, the focused post and
+                the loaded markers, so returning to the map resumes instead of restarting. */}
+            {hasOpenedMap && (
+              <div className={view === "map" ? "" : "hidden"}>
+                <FeedMapView
+                  isVisible={view === "map"}
+                  clusters={mapClusters}
+                  totalCount={mapTotalCount}
+                  overviewMode={mapOverview !== null}
+                  onViewportChange={setMapViewport}
+                  initialBounds={mapInitialBounds}
+                  focusedMapPostId={focusedMapPostId}
+                  focusedPlaces={focusedMapPlaces}
+                  focusedCountryCodes={focusedMapCountryCodes}
+                  setFocusedMapPostId={setFocusedMapPostId}
+                  focusedMapPost={focusedMapPost}
+                  setViewPostId={setViewPostId}
+                  goToUserProfile={goToUserProfile}
+                  initials={initials}
+                  getDateLabel={getDateLabel}
+                  getDestinationLabel={getDestinationLabel}
+                />
+              </div>
+            )}
+          </>
         )}
       </main>
 
