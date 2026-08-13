@@ -72,39 +72,57 @@ export function FeedMapView({
           initialBounds={initialBounds}
         />
 
-        {focusedMapPost && (
+        {/* Keyed off the focused *id*, not the loaded post: focus mode hides every other
+            marker, so the close button is the only way back to the full map. Waiting for
+            the post's details to arrive before rendering it means a slow or failed fetch
+            leaves the user stranded on a map showing one trip and no way out. */}
+        {focusedMapPostId && (
           <div className="pointer-events-none absolute inset-x-3 top-3 z-10">
             <div
-              role="button"
-              tabIndex={0}
-              onClick={() => setViewPostId(focusedMapPost.id)}
+              role={focusedMapPost ? "button" : undefined}
+              tabIndex={focusedMapPost ? 0 : undefined}
+              onClick={() => focusedMapPost && setViewPostId(focusedMapPost.id)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
+                if (focusedMapPost && (e.key === "Enter" || e.key === " ")) {
                   e.preventDefault();
                   setViewPostId(focusedMapPost.id);
                 }
               }}
-              className="pointer-events-auto flex items-center gap-3 rounded-2xl bg-white p-3 shadow-lg ring-1 ring-slate-200 transition active:scale-[0.99]"
+              className={`pointer-events-auto flex items-center gap-3 rounded-2xl bg-white p-3 shadow-lg ring-1 ring-slate-200 transition ${
+                focusedMapPost ? "active:scale-[0.99]" : ""
+              }`}
             >
-              <button
-                type="button"
-                onClick={(e) => goToUserProfile(focusedMapPost.userId, e)}
-                aria-label={`View ${focusedMapPost.user.name}'s profile`}
-                className="shrink-0 rounded-full transition active:scale-95"
-              >
-                <Avatar
-                  url={focusedMapPost.user.avatarUrl}
-                  initials={initials(focusedMapPost.user.name)}
-                  colorClass={focusedMapPost.user.avatarColor}
-                  className="h-10 w-10 text-xs"
-                />
-              </button>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-slate-900">
-                  {getDestinationLabel(focusedMapPost.destinations)}
-                </p>
-                <p className="truncate text-xs text-slate-500">{getDateLabel(focusedMapPost.date, true)}</p>
-              </div>
+              {focusedMapPost ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => goToUserProfile(focusedMapPost.userId, e)}
+                    aria-label={`View ${focusedMapPost.user.name}'s profile`}
+                    className="shrink-0 rounded-full transition active:scale-95"
+                  >
+                    <Avatar
+                      url={focusedMapPost.user.avatarUrl}
+                      initials={initials(focusedMapPost.user.name)}
+                      colorClass={focusedMapPost.user.avatarColor}
+                      className="h-10 w-10 text-xs"
+                    />
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-slate-900">
+                      {getDestinationLabel(focusedMapPost.destinations)}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">{getDateLabel(focusedMapPost.date, true)}</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-slate-100" />
+                  <div className="min-w-0 flex-1">
+                    <div className="h-3.5 w-2/3 animate-pulse rounded bg-slate-100" />
+                    <div className="mt-1.5 h-3 w-1/3 animate-pulse rounded bg-slate-100" />
+                  </div>
+                </>
+              )}
               <button
                 type="button"
                 onClick={(e) => {

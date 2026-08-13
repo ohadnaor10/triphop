@@ -313,8 +313,12 @@ export function useFocusedMapPost(postId: string | null, loadedPosts: Post[]): P
     let cancelled = false;
     supabase
       .from("posts")
+      // The FK is named explicitly because posts and profiles are related two ways —
+      // directly via posts.user_id, and as a many-to-many through saved_posts — and
+      // PostgREST refuses to guess ("more than one relationship was found"), failing the
+      // whole request rather than picking one.
       .select(
-        "id, user_id, destinations, date, vibes, bio, share_contact, created_at, profiles(name, age, gender, avatar_color, avatar_url, about)",
+        "id, user_id, destinations, date, vibes, bio, share_contact, created_at, profiles!posts_user_id_fkey(name, age, gender, avatar_color, avatar_url, about)",
       )
       .eq("id", postId)
       .single()
