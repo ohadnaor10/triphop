@@ -32,6 +32,17 @@ export type MapViewport = {
   zoom: number;
 };
 
+/** One country's worth of posts that named the country but no city. */
+export type MapGhost = {
+  countryCode: string;
+  countryName: string;
+  postCount: number;
+  singlePostId: string | null;
+  singleAuthorName: string | null;
+  singleAuthorAvatarUrl: string | null;
+  singleAuthorAvatarColor: string | null;
+};
+
 export type MapPointsStore = {
   /**
    * Raw one-row-per-(post, place) locations for the viewport. The client clusters these
@@ -45,7 +56,14 @@ export type MapPointsStore = {
    * grouping gets coarser.
    */
   overview: MapAggregate[] | null;
-  /** Total posts matching the filters, ignoring the viewport — for honest copy. */
+  /**
+   * Country-level markers for posts with no city. Returned for every country at once
+   * (bounded by ~250 rows) rather than filtered by viewport, because their coordinates
+   * are resolved on the client — the database only has bounding boxes, whose centres put
+   * Thailand out in the Gulf.
+   */
+  ghosts: MapGhost[];
+  /** Total posts the map can represent, ignoring the viewport — for honest copy. */
   totalCount: number;
   loading: boolean;
 };
@@ -99,11 +117,21 @@ type LocationRow = {
   author_avatar_color: string | null;
 };
 type AggregateRow = { tier: MapTier; key: string; label: string; lat: number; lng: number; post_count: number };
+type GhostRow = {
+  country_code: string;
+  country_name: string;
+  post_count: number;
+  single_post_id: string | null;
+  single_author_name: string | null;
+  single_author_avatar_url: string | null;
+  single_author_avatar_color: string | null;
+};
 
 export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null): MapPointsStore {
   const supabase = useClerkSupabaseClient();
   const [locations, setLocations] = useState<MapLocation[]>([]);
   const [overview, setOverview] = useState<MapAggregate[] | null>(null);
+  const [ghosts, setGhosts] = useState<MapGhost[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
@@ -153,9 +181,12 @@ export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null
         p_max_lng: padded.maxLng,
         p_max_lat: padded.maxLat,
       };
-      const [pointsResult, countResult] = await Promise.all([
+      const [pointsResult, countResult, ghostResult] = await Promise.all([
         supabase.rpc("search_posts_map_points", { ...params, ...bbox, p_limit: LOCATION_CAP }),
         supabase.rpc("count_posts_map", params),
+        // Not bbox-filtered: the result is one row per country at most, and the client
+        // needs the whole set anyway to place them at its own label points.
+        supabase.rpc("search_posts_map_country_ghosts", params),
       ]);
 
       if (requestId !== requestIdRef.current) return; // superseded by a newer viewport
@@ -167,6 +198,20 @@ export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null
       }
 
       const rows = (pointsResult.data as LocationRow[] | null) ?? [];
+
+      if (!ghostResult.error) {
+        setGhosts(
+          ((ghostResult.data as GhostRow[] | null) ?? []).map((row) => ({
+            countryCode: row.country_code,
+            countryName: row.country_name,
+            postCount: Number(row.post_count),
+            singlePostId: row.single_post_id,
+            singleAuthorName: row.single_author_name,
+            singleAuthorAvatarUrl: row.single_author_avatar_url,
+            singleAuthorAvatarColor: row.single_author_avatar_color,
+          })),
+        );
+      }
 
       if (rows.length >= LOCATION_CAP) {
         // Too dense to ship in full. Rather than clustering a truncated sample — which
@@ -195,11 +240,13 @@ export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null
         setOverview(null);
         setLocations(
           rows.map((row) => ({
+            kind: "place" as const,
             postId: row.post_id,
             placeId: String(row.place_id),
             label: row.label,
             lat: row.lat,
             lng: row.lng,
+            postCount: 1,
             authorName: row.author_name ?? "Traveler",
             authorAvatarUrl: row.author_avatar_url,
             authorAvatarColor: row.author_avatar_color,
@@ -221,7 +268,124 @@ export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null
     return () => clearTimeout(timer);
   }, [viewport, fetchPoints]);
 
-  return { locations, overview, totalCount, loading };
+  return { locations, overview, ghosts, totalCount, loading };
+}
+
+/**
+ * What a list sheet is showing. Two shapes, because the two cases know their membership
+ * differently: a cluster carries the ids of the posts merged into it, while a country
+ * ghost knows only its country — the map never receives the individual posts behind it.
+ */
+export type PostListSource =
+  | { kind: "cluster"; title: string; postIds: string[] }
+  | { kind: "country"; title: string; countryCode: string; postCount: number };
+
+export type PostListStore = {
+  posts: Post[];
+  loading: boolean;
+  hasMore: boolean;
+  loadMore: () => void;
+  total: number;
+};
+
+const LIST_PAGE_SIZE = 20;
+
+// Posts behind an open list sheet, paged like the feed so a 79-post cluster shows its
+// first rows immediately instead of waiting on the whole set.
+//
+// Paging state lives in refs rather than state deliberately: the sheet must keep its
+// scroll position when the user opens a post and comes back, and a page counter in state
+// would reset the list on every re-render of the parent.
+export function usePostList(source: PostListSource | null, filters: PostsFilters): PostListStore {
+  const supabase = useClerkSupabaseClient();
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+
+  const activeDateSearch = filters.dateSearch && hasActiveDateSearch(filters.dateSearch) ? filters.dateSearch : null;
+  const filterKey = JSON.stringify({
+    p_vibe: filters.vibe === "All" ? null : filters.vibe,
+    p_gender: filters.gender === "All" ? null : filters.gender,
+    p_age_min: filters.ageMin.trim() === "" ? null : Number(filters.ageMin),
+    p_age_max: filters.ageMax.trim() === "" ? null : Number(filters.ageMax),
+    p_saved_only: filters.savedOnly,
+    p_date_search: activeDateSearch,
+  });
+
+  // Identity of the list itself: same list, same key, no reload.
+  const sourceKey = source
+    ? source.kind === "cluster"
+      ? `cluster:${source.postIds.join(",")}`
+      : `country:${source.countryCode}`
+    : null;
+
+  const requestIdRef = useRef(0);
+  const loadedCountRef = useRef(0);
+  const total = source ? (source.kind === "cluster" ? source.postIds.length : source.postCount) : 0;
+
+  const fetchPage = useCallback(
+    async (offset: number) => {
+      if (!source) return;
+      const requestId = ++requestIdRef.current;
+      setLoading(true);
+
+      let fetched: Post[] = [];
+      if (source.kind === "cluster") {
+        // The ids are already in hand, so a page is a slice of them — no reason to make
+        // the database re-derive membership it never computed in the first place.
+        const pageIds = source.postIds.slice(offset, offset + LIST_PAGE_SIZE);
+        if (pageIds.length > 0) {
+          const { data, error } = await supabase
+            .from("posts")
+            .select(
+              "id, user_id, destinations, date, vibes, bio, share_contact, created_at, profiles!posts_user_id_fkey(name, age, gender, avatar_color, avatar_url, about)",
+            )
+            .in("id", pageIds)
+            .order("created_at", { ascending: false });
+          if (error) console.error("Failed to load cluster posts:", error.message);
+          fetched = ((data as unknown as PostRow[] | null) ?? []).map(postRowToPost);
+        }
+      } else {
+        const { data, error } = await supabase.rpc("list_country_ghost_posts", {
+          ...(JSON.parse(filterKey) as Record<string, unknown>),
+          p_country_code: source.countryCode,
+          p_limit: LIST_PAGE_SIZE,
+          p_offset: offset,
+        });
+        if (error) console.error("Failed to load country posts:", error.message);
+        fetched = ((data as GhostListRow[] | null) ?? []).map(ghostListRowToPost);
+      }
+
+      if (requestId !== requestIdRef.current) return; // a different list was opened
+      setPosts((prev) => (offset === 0 ? fetched : [...prev, ...fetched]));
+      loadedCountRef.current = offset + fetched.length;
+      setHasMore(loadedCountRef.current < total);
+      setLoading(false);
+    },
+    [source, supabase, filterKey, total],
+  );
+
+  // Only the first page is loaded automatically; the sheet asks for the rest as it is
+  // scrolled. setState happens inside the async call, never synchronously in the effect.
+  useEffect(() => {
+    if (!sourceKey) return;
+    loadedCountRef.current = 0;
+    // Deferred rather than called inline: fetchPage flips `loading` before its first
+    // await, which counts as a synchronous setState inside an effect. Same setTimeout
+    // kick postsStore.ts uses for its own refresh.
+    const kick = setTimeout(() => fetchPage(0), 0);
+    return () => clearTimeout(kick);
+    // fetchPage is keyed on the same source; depending on sourceKey alone keeps a
+    // re-render of the parent from refetching the list under the user.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceKey]);
+
+  const loadMore = useCallback(() => {
+    if (loading || !hasMore) return;
+    fetchPage(loadedCountRef.current);
+  }, [fetchPage, loading, hasMore]);
+
+  return { posts, loading, hasMore, loadMore, total };
 }
 
 export type FocusedPlace = { label: string; lat: number; lng: number };
@@ -295,6 +459,63 @@ type PostRow = {
   } | null;
 };
 
+// The PostgREST embed shape and the RPC's flat shape carry the same post, spelled
+// differently — both funnel through Post so callers never see the difference.
+function postRowToPost(row: PostRow): Post {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    user: {
+      name: row.profiles?.name ?? "Traveler",
+      age: row.profiles?.age ?? 0,
+      gender: row.profiles?.gender ?? "Male",
+      avatarColor: row.profiles?.avatar_color ?? colorFor(row.user_id),
+      avatarUrl: row.profiles?.avatar_url ?? null,
+      about: row.profiles?.about ?? undefined,
+    },
+    destinations: row.destinations,
+    date: row.date,
+    vibes: row.vibes,
+    bio: row.bio,
+    // Contact is never part of a public read — revealContact fetches it separately for
+    // signed-in callers only.
+    whatsapp: "",
+    shareContact: row.share_contact,
+    createdAt: row.created_at,
+  };
+}
+
+type GhostListRow = {
+  id: string;
+  user_id: string;
+  destinations: Post["destinations"];
+  date: Post["date"];
+  vibes: Post["vibes"];
+  bio: string;
+  share_contact: boolean;
+  created_at: string;
+  profile_name: string | null;
+  profile_age: number | null;
+  profile_gender: Post["user"]["gender"] | null;
+  profile_avatar_color: string | null;
+  profile_avatar_url: string | null;
+  profile_about: string | null;
+};
+
+function ghostListRowToPost(row: GhostListRow): Post {
+  return postRowToPost({
+    ...row,
+    profiles: {
+      name: row.profile_name,
+      age: row.profile_age,
+      gender: row.profile_gender,
+      avatar_color: row.profile_avatar_color,
+      avatar_url: row.profile_avatar_url,
+      about: row.profile_about,
+    },
+  });
+}
+
 // One post by id, from memory if the feed already has it and from the database if not.
 //
 // The map ships only coordinates — that is what keeps a viewport's worth of markers cheap
@@ -327,28 +548,7 @@ export function usePostById(postId: string | null, loadedPosts: Post[]): Post | 
           console.error("Failed to load post for map pin:", error?.message);
           return;
         }
-        const row = data as unknown as PostRow;
-        setFetched({
-          id: row.id,
-          userId: row.user_id,
-          user: {
-            name: row.profiles?.name ?? "Traveler",
-            age: row.profiles?.age ?? 0,
-            gender: row.profiles?.gender ?? "Male",
-            avatarColor: row.profiles?.avatar_color ?? colorFor(row.user_id),
-            avatarUrl: row.profiles?.avatar_url ?? null,
-            about: row.profiles?.about ?? undefined,
-          },
-          destinations: row.destinations,
-          date: row.date,
-          vibes: row.vibes,
-          bio: row.bio,
-          // Contact is never part of a public read — revealContact fetches it separately
-          // for signed-in callers only.
-          whatsapp: "",
-          shareContact: row.share_contact,
-          createdAt: row.created_at,
-        });
+        setFetched(postRowToPost(data as unknown as PostRow));
       });
     return () => {
       cancelled = true;

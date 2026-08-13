@@ -22,6 +22,8 @@ export type FeedMapViewProps = {
   overviewMode: boolean;
   onViewportChange: (viewport: MapViewport) => void;
   initialBounds: [number, number, number, number] | null;
+  /** A cluster zooming can never split — the caller opens a list of its posts instead. */
+  onOpenClusterList: (cluster: MapCluster) => void;
   focusedMapPostId: string | null;
   /** Destinations of the focused post; while non-empty the map shows only these. */
   focusedPlaces: FocusedPlace[];
@@ -42,6 +44,7 @@ export function FeedMapView({
   overviewMode,
   onViewportChange,
   initialBounds,
+  onOpenClusterList,
   focusedMapPostId,
   focusedPlaces,
   focusedCountryCodes,
@@ -72,6 +75,7 @@ export function FeedMapView({
           focusedPlaces={focusedPlaces}
           focusedCountryCodes={focusedCountryCodes}
           onSelectPost={(id) => setFocusedMapPostId(id)}
+          onOpenClusterList={onOpenClusterList}
           onViewportChange={onViewportChange}
           initialBounds={initialBounds}
         />

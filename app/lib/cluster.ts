@@ -14,16 +14,27 @@
 // mean the same thing everywhere on the map.
 
 export type MapLocation = {
-  /** One post's presence at one place. A post with three cities contributes three of these. */
-  postId: string;
+  /**
+   * "place" is a post at a specific city. "ghost" is a whole country's worth of posts that
+   * named the country but no city — one marker per country, drawn deliberately vaguely,
+   * since there is no point on the map that would honestly represent it.
+   */
+  kind: "place" | "ghost";
+  /** Null on a ghost standing for more than one post — there is no single post to open. */
+  postId: string | null;
+  /** Place id, or the country code for a ghost. */
   placeId: string;
   label: string;
   lat: number;
   lng: number;
-  /** The poster, carried through so a single-post marker can draw their avatar. */
-  authorName: string;
+  /** Posts this location stands for. Always 1 for a place; a ghost carries its country's total. */
+  postCount: number;
+  /** The poster, when there is exactly one — a marker for several people shows a count instead. */
+  authorName: string | null;
   authorAvatarUrl: string | null;
   authorAvatarColor: string | null;
+  /** Set on ghosts, so tapping one can list that country's cityless posts. */
+  countryCode?: string;
 };
 
 export type MapCluster = {
@@ -38,6 +49,16 @@ export type MapCluster = {
   postId: string | null;
   /** Present alongside postId — a lone marker renders as its author's avatar, not a pin. */
   author: { name: string; avatarUrl: string | null; avatarColor: string | null } | null;
+  /** True when every member is a ghost, which is what earns the dashed, vague styling. */
+  isGhost: boolean;
+  /** Set when the cluster is exactly one country's ghost, so its list can be fetched. */
+  ghostCountryCode: string | null;
+  /**
+   * Ids of the posts merged in here, for the list a non-splittable cluster opens. Ghosts
+   * standing for several posts contribute no ids (the map never receives them), which is
+   * why the list for those is fetched by country instead.
+   */
+  postIds: string[];
   /** [minLng, minLat, maxLng, maxLat] of the members, for zooming a cluster open. */
   bounds: [number, number, number, number];
 };
@@ -69,8 +90,18 @@ type WorkingCluster = {
   sumLng: number;
   locationCount: number;
   postIds: Set<string>;
+  /**
+   * Posts contributed by multi-post ghosts, which arrive as a count with no ids. Kept
+   * apart from postIds so the two can be summed without pretending they are dedupable —
+   * a post that is precise about one country and vague about another could in principle
+   * be counted twice, but only if both markers land in the same cluster, which means the
+   * two countries are adjacent on screen.
+   */
+  countedWithoutIds: number;
   label: string;
   postId: string | null;
+  isGhost: boolean;
+  ghostCountryCode: string | null;
   author: { name: string; avatarUrl: string | null; avatarColor: string | null };
   minLng: number;
   minLat: number;
@@ -131,7 +162,22 @@ class SpatialGrid {
   }
 }
 
-type Pair = { a: number; b: number; distanceSq: number; versionA: number; versionB: number };
+type Pair = {
+  a: number;
+  b: number;
+  distanceSq: number;
+  /** A precise city marker paired with a vague country ghost. */
+  mixedKind: boolean;
+  versionA: number;
+  versionB: number;
+};
+
+// Distance first; among equally-distant pairs, same-kind merges go first so a ghost stays
+// separate from a city marker for as long as the threshold allows.
+function comesFirst(a: Pair, b: Pair): boolean {
+  if (a.distanceSq !== b.distanceSq) return a.distanceSq < b.distanceSq;
+  return !a.mixedKind && b.mixedKind;
+}
 
 // Min-heap over candidate pairs. Merging is driven by "closest pair first", so the
 // ordering has to be global — but recomputing every pair after each merge is what made a
@@ -147,7 +193,7 @@ class PairHeap {
     let i = items.length - 1;
     while (i > 0) {
       const parent = (i - 1) >> 1;
-      if (items[parent].distanceSq <= items[i].distanceSq) break;
+      if (!comesFirst(items[i], items[parent])) break;
       [items[parent], items[i]] = [items[i], items[parent]];
       i = parent;
     }
@@ -165,8 +211,8 @@ class PairHeap {
         const left = 2 * i + 1;
         const right = left + 1;
         let smallest = i;
-        if (left < items.length && items[left].distanceSq < items[smallest].distanceSq) smallest = left;
-        if (right < items.length && items[right].distanceSq < items[smallest].distanceSq) smallest = right;
+        if (left < items.length && comesFirst(items[left], items[smallest])) smallest = left;
+        if (right < items.length && comesFirst(items[right], items[smallest])) smallest = right;
         if (smallest === i) break;
         [items[smallest], items[i]] = [items[i], items[smallest]];
         i = smallest;
@@ -189,6 +235,11 @@ function merge(target: WorkingCluster, source: WorkingCluster) {
   if (source.locationCount > target.locationCount) target.label = source.label;
   target.locationCount += source.locationCount;
   for (const id of source.postIds) target.postIds.add(id);
+  target.countedWithoutIds += source.countedWithoutIds;
+  // A mixed cluster is no longer purely vague, so it loses the dashed styling: some of
+  // what it counts really is pinned to a city.
+  target.isGhost = target.isGhost && source.isGhost;
+  target.ghostCountryCode = null;
   target.postId = null;
   target.minLng = Math.min(target.minLng, source.minLng);
   target.minLat = Math.min(target.minLat, source.minLat);
@@ -196,6 +247,26 @@ function merge(target: WorkingCluster, source: WorkingCluster) {
   target.maxLat = Math.max(target.maxLat, source.maxLat);
   target.version += 1;
   source.alive = false;
+}
+
+/**
+ * Whether zooming in could ever break this cluster apart.
+ *
+ * A cluster of posts sharing one exact coordinate never separates, no matter the zoom, so
+ * tapping it to "zoom in" is a dead end — and so is a handful of posts scattered over 200
+ * metres, which stay merged even at street level. Projecting the cluster's own extent at
+ * the map's maximum zoom answers both cases with the same test.
+ */
+export function canSplitByZooming(
+  cluster: MapCluster,
+  maxZoom: number,
+  minSeparationPx: number = DEFAULT_MIN_SEPARATION_PX,
+): boolean {
+  const [minLng, minLat, maxLng, maxLat] = cluster.bounds;
+  const worldSize = WORLD_TILE_SIZE * Math.pow(2, maxZoom);
+  const width = Math.abs(projectX(maxLng, worldSize) - projectX(minLng, worldSize));
+  const height = Math.abs(projectY(maxLat, worldSize) - projectY(minLat, worldSize));
+  return Math.max(width, height) >= minSeparationPx;
 }
 
 /**
@@ -226,11 +297,14 @@ export function clusterLocations(
     sumLat: location.lat,
     sumLng: location.lng,
     locationCount: 1,
-    postIds: new Set([location.postId]),
+    postIds: new Set(location.postId ? [location.postId] : []),
+    countedWithoutIds: location.postId ? 0 : location.postCount,
     label: location.label,
     postId: location.postId,
+    isGhost: location.kind === "ghost",
+    ghostCountryCode: location.kind === "ghost" ? location.countryCode ?? null : null,
     author: {
-      name: location.authorName,
+      name: location.authorName ?? "",
       avatarUrl: location.authorAvatarUrl,
       avatarColor: location.authorAvatarColor,
     },
@@ -258,6 +332,7 @@ export function clusterLocations(
         a: index,
         b: other,
         distanceSq,
+        mixedKind: cluster.isGhost !== clusters[other].isGhost,
         versionA: cluster.version,
         versionB: clusters[other].version,
       });
@@ -297,10 +372,13 @@ export function clusterLocations(
       label: cluster.label,
       lat: cluster.sumLat / cluster.locationCount,
       lng: cluster.sumLng / cluster.locationCount,
-      postCount: cluster.postIds.size,
+      postCount: cluster.postIds.size + cluster.countedWithoutIds,
       locationCount: cluster.locationCount,
       postId: cluster.locationCount === 1 ? cluster.postId : null,
-      author: cluster.locationCount === 1 ? cluster.author : null,
+      author: cluster.locationCount === 1 && cluster.author.name ? cluster.author : null,
+      isGhost: cluster.isGhost,
+      ghostCountryCode: cluster.locationCount === 1 ? cluster.ghostCountryCode : null,
+      postIds: [...cluster.postIds],
       bounds: [cluster.minLng, cluster.minLat, cluster.maxLng, cluster.maxLat] as [number, number, number, number],
     }));
 }

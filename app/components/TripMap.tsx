@@ -1,10 +1,11 @@
 "use client";
 
+import turfBbox from "@turf/bbox";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef, useState } from "react";
 import { getCountryBoundary } from "../lib/geo";
-import type { MapCluster } from "../lib/cluster";
+import { canSplitByZooming, type MapCluster } from "../lib/cluster";
 import type { FocusedPlace, MapViewport } from "../lib/mapStore";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
@@ -16,9 +17,6 @@ const BOUNDARY_LINE_LAYER = `${BOUNDARY_SOURCE_ID}-line`;
 // fits on screen, where every marker collapses into a handful of meaningless blobs and
 // panning stops meaning anything — so the camera simply doesn't go there.
 const MIN_ZOOM = 2;
-// Fallback for tapping a cluster whose members share one exact coordinate: its bounds are
-// a single point, so there is nothing to fit the camera to.
-const COINCIDENT_CLUSTER_ZOOM = 13;
 // A focused post with a single destination has no extent to fit either — close enough to
 // place the city in its surroundings, not so close that all context is lost.
 const SINGLE_PLACE_FOCUS_ZOOM = 9;
@@ -28,6 +26,9 @@ const SINGLE_PLACE_FOCUS_ZOOM = 9;
 // and competes with the pins it is supposed to support. Flip to true to bring it back —
 // toBoundaryFeatureCollection and the effect below are maintained for that.
 const SHOW_FOCUSED_COUNTRY_SHADING = false;
+// How far in the camera is allowed to go, and therefore the zoom at which "can this
+// cluster ever be broken apart?" is decided.
+const MAX_ZOOM = 18;
 
 type BoundaryFeature = GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
 
@@ -74,8 +75,13 @@ const AVATAR_GRADIENTS: Record<string, string> = {
 function createAvatarElement(cluster: MapCluster, focused: boolean): HTMLDivElement {
   const wrapper = document.createElement("div");
   const author = cluster.author;
+  // A ghost stands for a country, not a spot on it, so it is drawn deliberately unlike a
+  // real marker: dashed border, faded, no shadow. The style is the disclaimer — nothing
+  // about a solid pin would tell you the location is a guess.
+  const ghost = cluster.isGhost;
   wrapper.style.cssText = `width:36px;height:36px;border-radius:9999px;overflow:hidden;cursor:pointer;
-    border:2px solid ${focused ? "#f97316" : "#ffffff"};box-shadow:0 2px 6px rgba(15,23,42,0.35);
+    border:2px ${ghost ? "dashed #64748b" : `solid ${focused ? "#f97316" : "#ffffff"}`};
+    ${ghost ? "opacity:0.72;" : "box-shadow:0 2px 6px rgba(15,23,42,0.35);"}
     display:flex;align-items:center;justify-content:center;background:#e2e8f0;`;
 
   if (author?.avatarUrl) {
@@ -93,7 +99,9 @@ function createAvatarElement(cluster: MapCluster, focused: boolean): HTMLDivElem
     wrapper.appendChild(initials);
   }
 
-  wrapper.title = `${author?.name ?? "Traveler"} · ${cluster.label}`;
+  wrapper.title = ghost
+    ? `Somewhere in ${cluster.label} · no city set`
+    : `${author?.name ?? "Traveler"} · ${cluster.label}`;
   return wrapper;
 }
 
@@ -123,14 +131,20 @@ function createBubbleElement(cluster: MapCluster): HTMLDivElement {
   // Area, not diameter, tracks the count — sqrt keeps a 100-post bubble from dwarfing a
   // 10-post one by a factor of ten.
   const size = Math.min(64, 34 + Math.sqrt(cluster.postCount) * 4);
-  wrapper.style.cssText = `width:${size}px;height:${size}px;border-radius:9999px;background:rgba(249,115,22,0.92);
+  // Same vague treatment as a ghost avatar: a country's worth of undecided trips is
+  // still a guess about where those people will be.
+  const ghost = cluster.isGhost;
+  wrapper.style.cssText = `width:${size}px;height:${size}px;border-radius:9999px;
+    background:${ghost ? "rgba(100,116,139,0.85)" : "rgba(249,115,22,0.92)"};
     color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;
-    border:2px solid #fff;box-shadow:0 2px 6px rgba(15,23,42,0.35);cursor:pointer;`;
+    border:2px ${ghost ? "dashed #e2e8f0" : "solid #fff"};box-shadow:0 2px 6px rgba(15,23,42,0.35);cursor:pointer;`;
   const count = document.createElement("span");
   count.textContent = String(cluster.postCount);
   count.style.cssText = "font-size:13px;font-weight:800;";
   wrapper.appendChild(count);
-  wrapper.title = `${cluster.label} · ${cluster.postCount} ${cluster.postCount === 1 ? "trip" : "trips"}`;
+  wrapper.title = ghost
+    ? `${cluster.label} · ${cluster.postCount} trips with no city set`
+    : `${cluster.label} · ${cluster.postCount} ${cluster.postCount === 1 ? "trip" : "trips"}`;
   return wrapper;
 }
 
@@ -148,9 +162,19 @@ export type TripMapProps = {
    * hiding all clusters and avatars so the trip is read on its own.
    */
   focusedPlaces: FocusedPlace[];
-  /** Country codes of the focused post — only used when SHOW_FOCUSED_COUNTRY_SHADING is on. */
+  /**
+   * Countries to shade behind the focused post. Normally empty — a post with cities shows
+   * pins instead — but a country-only post has no point to pin, so its country is tinted
+   * to make focus visible at all.
+   */
   focusedCountryCodes: string[];
   onSelectPost: (postId: string) => void;
+  /**
+   * A cluster that zooming can never separate — every member on one coordinate, or a
+   * knot too tight to resolve even at max zoom. Zooming into one of those is a dead end,
+   * so the caller opens a list of its posts instead.
+   */
+  onOpenClusterList: (cluster: MapCluster) => void;
   /** Fired on moveend (and once the style loads) so the caller can refetch for the new area. */
   onViewportChange: (viewport: MapViewport) => void;
   /** Initial camera, applied once — used to open on the destination the user searched for. */
@@ -160,6 +184,7 @@ export type TripMapProps = {
 export default function TripMap({
   isVisible,
   clusters,
+  onOpenClusterList,
   focusedPostId,
   focusedPlaces,
   focusedCountryCodes,
@@ -175,14 +200,16 @@ export default function TripMap({
   // whole lifetime: re-running them on every render would tear down and rebuild the
   // Mapbox instance, which is both a visible flicker and a billed map load.
   const onSelectPostRef = useRef(onSelectPost);
+  const onOpenClusterListRef = useRef(onOpenClusterList);
   const onViewportChangeRef = useRef(onViewportChange);
   // Lets the visibility effect below re-announce the viewport without duplicating the
   // bounds-reading logic that lives inside the map-init effect.
   const emitViewportRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     onSelectPostRef.current = onSelectPost;
+    onOpenClusterListRef.current = onOpenClusterList;
     onViewportChangeRef.current = onViewportChange;
-  }, [onSelectPost, onViewportChange]);
+  }, [onSelectPost, onOpenClusterList, onViewportChange]);
 
   // Style-loaded is tracked as state (not a one-off `map.once("load", ...)` per effect)
   // so every downstream effect re-runs exactly once the map is actually ready, always
@@ -199,6 +226,7 @@ export default function TripMap({
       center: [10, 20],
       zoom: MIN_ZOOM,
       minZoom: MIN_ZOOM,
+      maxZoom: MAX_ZOOM,
     });
     map.addControl(new mapboxgl.NavigationControl(), "top-right");
 
@@ -273,10 +301,12 @@ export default function TripMap({
     markersRef.current.forEach((m) => m.remove());
     const markers: mapboxgl.Marker[] = [];
 
-    // Focus mode: the focused post's own destinations replace everything else, so its
-    // trip reads on its own instead of having to be picked out of a crowd of other
-    // people's markers. The card's X clears focusedPostId, which brings the rest back.
-    if (focusedPlaces.length > 0) {
+    // Focus mode: the focused post replaces everything else on the map, so its trip reads
+    // on its own instead of having to be picked out of a crowd of other people's markers.
+    // Keyed on the focused id rather than on its places, because a country-only post has
+    // no places at all and still needs the rest of the map cleared — for those, the
+    // country shading below is what makes the focus visible.
+    if (focusedPostId) {
       for (const place of focusedPlaces) {
         markers.push(
           new mapboxgl.Marker({ element: createLabelledPinElement(place), anchor: "bottom" })
@@ -306,22 +336,23 @@ export default function TripMap({
           return;
         }
 
-        const [minLng, minLat, maxLng, maxLat] = cluster.bounds;
-        // Zoom to the cluster's own extent rather than to a fixed step, so one tap opens
-        // exactly this group and no more — a tight knot of towns needs far more zoom than
-        // a loose pair of cities, and a fixed step gets both wrong.
-        if (minLng === maxLng && minLat === maxLat) {
-          // Every member sits on the same coordinate, so no amount of zoom separates them
-          // and fitBounds has nothing to fit.
-          map.easeTo({ center: [cluster.lng, cluster.lat], zoom: COINCIDENT_CLUSTER_ZOOM, duration: 700, essential: true });
+        // Zooming only helps if the members would actually come apart at maximum zoom.
+        // Otherwise the tap is a dead end — the user zooms, the bubble stays whole, and
+        // the posts inside it are unreachable. Those open a list instead.
+        if (!canSplitByZooming(cluster, MAX_ZOOM)) {
+          onOpenClusterListRef.current(cluster);
           return;
         }
+        const [minLng, minLat, maxLng, maxLat] = cluster.bounds;
+        // Fit the cluster's own extent rather than stepping a fixed amount: a tight knot
+        // of towns needs far more zoom than a loose pair of cities, and one fixed step
+        // gets both wrong.
         map.fitBounds(
           [
             [minLng, minLat],
             [maxLng, maxLat],
           ],
-          { padding: 80, maxZoom: 15, duration: 700, essential: true },
+          { padding: 80, maxZoom: MAX_ZOOM, duration: 700, essential: true },
         );
       });
 
@@ -345,7 +376,23 @@ export default function TripMap({
   // where the rest are.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !isStyleLoaded || focusedPlaces.length === 0) return;
+    if (!map || !isStyleLoaded) return;
+
+    // A country-only post has nothing to pin, so the camera frames the country itself.
+    if (focusedPlaces.length === 0) {
+      if (focusedCountryCodes.length === 0) return;
+      const boundary = toBoundaryFeatureCollection(focusedCountryCodes);
+      if (boundary.features.length === 0) return;
+      const [minLng, minLat, maxLng, maxLat] = turfBbox(boundary) as [number, number, number, number];
+      map.fitBounds(
+        [
+          [minLng, minLat],
+          [maxLng, maxLat],
+        ],
+        { padding: 40, maxZoom: SINGLE_PLACE_FOCUS_ZOOM, duration: 700, essential: true },
+      );
+      return;
+    }
 
     const [first] = focusedPlaces;
     if (focusedPlaces.length === 1) {
@@ -357,15 +404,19 @@ export default function TripMap({
       new mapboxgl.LngLatBounds([first.lng, first.lat], [first.lng, first.lat]),
     );
     map.fitBounds(bounds, { padding: 70, maxZoom: SINGLE_PLACE_FOCUS_ZOOM, duration: 700, essential: true });
-  }, [focusedPlaces, isStyleLoaded]);
+  }, [focusedPlaces, focusedCountryCodes, isStyleLoaded]);
 
-  // Dormant — see SHOW_FOCUSED_COUNTRY_SHADING. Left wired up rather than deleted so the
-  // shading can be switched back on without having to rebuild it.
+  // Country shading. Off for posts that have pins (SHOW_FOCUSED_COUNTRY_SHADING) — a
+  // country-sized fill just tints the whole viewport at the zoom focusing lands on. But a
+  // country-only post has nothing to pin, so shading its country is the only way focus
+  // reads as focus at all, and for those the caller passes country codes through.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !isStyleLoaded || !SHOW_FOCUSED_COUNTRY_SHADING) return;
+    if (!map || !isStyleLoaded) return;
 
-    const boundaryData = toBoundaryFeatureCollection(focusedCountryCodes);
+    const boundaryData = toBoundaryFeatureCollection(
+      SHOW_FOCUSED_COUNTRY_SHADING || focusedPlaces.length === 0 ? focusedCountryCodes : [],
+    );
     const source = map.getSource(BOUNDARY_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
     if (source) {
       source.setData(boundaryData);
@@ -384,7 +435,7 @@ export default function TripMap({
       source: BOUNDARY_SOURCE_ID,
       paint: { "line-color": "#2563EB", "line-width": 2 },
     });
-  }, [focusedCountryCodes, isStyleLoaded]);
+  }, [focusedCountryCodes, focusedPlaces, isStyleLoaded]);
 
   useEffect(() => {
     const map = mapRef.current;
