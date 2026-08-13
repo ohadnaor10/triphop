@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Post } from "../page";
 import type { MapLocation } from "./cluster";
+import { getCountryByCode } from "./geo";
 import { colorFor, type PostsFilters } from "./postsStore";
 import { hasActiveDateSearch } from "./relevance";
 import { useClerkSupabaseClient } from "./supabase/useClerkSupabaseClient";
@@ -36,6 +37,13 @@ export type MapViewport = {
 export type MapGhost = {
   countryCode: string;
   countryName: string;
+  /**
+   * The country's label point, resolved here from the bundled dataset. Resolved at fetch
+   * time rather than at render time so ghosts can be viewport-filtered alongside the city
+   * locations — see the filtering in fetchPoints for why that matters.
+   */
+  lat: number;
+  lng: number;
   postCount: number;
   singlePostId: string | null;
   singleAuthorName: string | null;
@@ -57,10 +65,16 @@ export type MapPointsStore = {
    */
   overview: MapAggregate[] | null;
   /**
-   * Country-level markers for posts with no city. Returned for every country at once
-   * (bounded by ~250 rows) rather than filtered by viewport, because their coordinates
-   * are resolved on the client — the database only has bounding boxes, whose centres put
-   * Thailand out in the Gulf.
+   * Country-level markers for posts with no city, filtered to the same viewport as
+   * `locations` and updated in the same snapshot.
+   *
+   * The database returns every country at once (it has no usable coordinates — a bbox
+   * centre puts Thailand out in the Gulf), so the coordinates and the viewport filter are
+   * both applied here. Filtering matters for more than payload size: ghosts held globally
+   * while city locations were bbox-filtered meant that after a pan, the new area's ghosts
+   * were already in memory while its city markers were not. They clustered alone, drew as
+   * standalone dashed avatars, and then vanished as the arriving city markers absorbed
+   * them — a visible flash on every pan.
    */
   ghosts: MapGhost[];
   /** Total posts the map can represent, ignoring the viewport — for honest copy. */
@@ -104,6 +118,13 @@ function isInside(inner: MapViewport, outer: MapViewport): boolean {
     inner.minLng >= outer.minLng &&
     inner.maxLng <= outer.maxLng
   );
+}
+
+// Same bbox test the map RPC applies server-side, including the antimeridian case where a
+// viewport arrives with min > max longitude.
+function isWithin(lat: number, lng: number, box: MapViewport): boolean {
+  if (lat < box.minLat || lat > box.maxLat) return false;
+  return box.minLng <= box.maxLng ? lng >= box.minLng && lng <= box.maxLng : lng >= box.minLng || lng <= box.maxLng;
 }
 
 type LocationRow = {
@@ -201,15 +222,26 @@ export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null
 
       if (!ghostResult.error) {
         setGhosts(
-          ((ghostResult.data as GhostRow[] | null) ?? []).map((row) => ({
-            countryCode: row.country_code,
-            countryName: row.country_name,
-            postCount: Number(row.post_count),
-            singlePostId: row.single_post_id,
-            singleAuthorName: row.single_author_name,
-            singleAuthorAvatarUrl: row.single_author_avatar_url,
-            singleAuthorAvatarColor: row.single_author_avatar_color,
-          })),
+          ((ghostResult.data as GhostRow[] | null) ?? []).flatMap((row) => {
+            const country = getCountryByCode(row.country_code);
+            // No coordinates means nothing to draw. Never fall back to 0/0, which would
+            // plant a marker in the Gulf of Guinea looking exactly like a real one.
+            if (!country || (country.lat === 0 && country.lng === 0)) return [];
+            if (!isWithin(country.lat, country.lng, padded)) return [];
+            return [
+              {
+                countryCode: row.country_code,
+                countryName: row.country_name,
+                lat: country.lat,
+                lng: country.lng,
+                postCount: Number(row.post_count),
+                singlePostId: row.single_post_id,
+                singleAuthorName: row.single_author_name,
+                singleAuthorAvatarUrl: row.single_author_avatar_url,
+                singleAuthorAvatarColor: row.single_author_avatar_color,
+              },
+            ];
+          }),
         );
       }
 

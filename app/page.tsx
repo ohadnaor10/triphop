@@ -1110,52 +1110,6 @@ function HomePageContent() {
   // meant the map's contents depended on how far the user had scrolled the feed first.
   const [mapViewport, setMapViewport] = useState<MapViewport | null>(null);
   const [focusedMapPostId, setFocusedMapPostId] = useState<string | null>(null);
-  // The list sheet a non-splittable cluster (or a country ghost) opens, plus the state
-  // needed to come back to it: opening a post from the list closes the sheet, and closing
-  // that post has to land the user back on the same list, scrolled where they left it.
-  const [postListSource, setPostListSource] = useState<PostListSource | null>(null);
-  const [postListScrollTop, setPostListScrollTop] = useState(0);
-  const [postListHidden, setPostListHidden] = useState(false);
-  const postList = usePostList(postListSource, filters);
-
-  const openClusterList = useCallback((cluster: MapCluster) => {
-    setPostListScrollTop(0);
-    setPostListHidden(false);
-    setPostListSource(
-      cluster.ghostCountryCode
-        ? {
-            kind: "country",
-            title: `Anywhere in ${cluster.label}`,
-            countryCode: cluster.ghostCountryCode,
-            postCount: cluster.postCount,
-          }
-        : { kind: "cluster", title: cluster.label, postIds: cluster.postIds },
-    );
-  }, [setPostListScrollTop, setPostListHidden, setPostListSource]);
-
-  const closePostList = useCallback(() => {
-    setPostListSource(null);
-    setPostListHidden(false);
-    setPostListScrollTop(0);
-  }, [setPostListSource, setPostListHidden, setPostListScrollTop]);
-
-  // Tapping a row focuses that post on the map. The sheet is hidden rather than dropped,
-  // so the card's X can bring it straight back with its scroll intact.
-  const focusPostFromList = useCallback(
-    (postId: string) => {
-      setPostListHidden(true);
-      setFocusedMapPostId(postId);
-    },
-    [setPostListHidden, setFocusedMapPostId],
-  );
-
-  // The preview card's X: back to the list if that is where the post came from, otherwise
-  // out to the full map.
-  const clearMapFocus = useCallback(() => {
-    setFocusedMapPostId(null);
-    setPostListHidden(false);
-  }, [setFocusedMapPostId, setPostListHidden]);
-
   // See switchToMapView: once true, the map stays mounted for the rest of the session.
   // Seeded from the restored view, not just from switchToMapView: returning from /profile
   // or /messages restores view === "map" directly, and a false start here would leave that
@@ -1168,31 +1122,23 @@ function HomePageContent() {
     totalCount: mapTotalCount,
   } = useMapPoints(filters, mapViewport);
 
-  // Country ghosts are placed here rather than server-side: the database only knows each
-  // country's bounding box, and a bbox centre puts Thailand's marker out in the Gulf. The
-  // bundled dataset's label point is on land and where a reader expects the country's
-  // middle.
+  // Coordinates and viewport filtering are applied in the store, so ghosts and city
+  // locations always describe the same snapshot; this is only the shape conversion.
   const ghostLocations = useMemo<MapLocation[]>(
     () =>
-      mapGhosts.flatMap((ghost) => {
-        const country = getCountryByCode(ghost.countryCode);
-        if (!country || (country.lat === 0 && country.lng === 0)) return [];
-        return [
-          {
-            kind: "ghost" as const,
-            postId: ghost.singlePostId,
-            placeId: `ghost:${ghost.countryCode}`,
-            label: ghost.countryName,
-            lat: country.lat,
-            lng: country.lng,
-            postCount: ghost.postCount,
-            authorName: ghost.singleAuthorName,
-            authorAvatarUrl: ghost.singleAuthorAvatarUrl,
-            authorAvatarColor: ghost.singleAuthorAvatarColor,
-            countryCode: ghost.countryCode,
-          },
-        ];
-      }),
+      mapGhosts.map((ghost) => ({
+        kind: "ghost" as const,
+        postId: ghost.singlePostId,
+        placeId: `ghost:${ghost.countryCode}`,
+        label: ghost.countryName,
+        lat: ghost.lat,
+        lng: ghost.lng,
+        postCount: ghost.postCount,
+        authorName: ghost.singleAuthorName,
+        authorAvatarUrl: ghost.singleAuthorAvatarUrl,
+        authorAvatarColor: ghost.singleAuthorAvatarColor,
+        countryCode: ghost.countryCode,
+      })),
     [mapGhosts],
   );
 
@@ -1223,6 +1169,95 @@ function HomePageContent() {
     }
     return clusterLocations([...mapLocations, ...ghostLocations], mapViewport?.zoom ?? 2);
   }, [mapLocations, ghostLocations, mapOverview, mapViewport?.zoom]);
+
+  // The list sheet a non-splittable cluster (or a country ghost) opens, plus the state
+  // needed to come back to it: opening a post from the list closes the sheet, and closing
+  // that post has to land the user back on the same list, scrolled where they left it.
+  const [postListSource, setPostListSource] = useState<PostListSource | null>(null);
+  const [postListScrollTop, setPostListScrollTop] = useState(0);
+  const [postListHidden, setPostListHidden] = useState(false);
+
+  const postList = usePostList(postListSource, filters);
+
+  // The filters the map itself applies. Destination is excluded because the map ignores it
+  // outright — the viewport is the destination filter there.
+  const mapFilterKey = useMemo(
+    () =>
+      JSON.stringify([filters.vibe, filters.gender, filters.ageMin, filters.ageMax, filters.savedOnly, filters.dateSearch]),
+    [filters],
+  );
+  const listFilterKeyRef = useRef(mapFilterKey);
+
+
+  const openClusterList = useCallback((cluster: MapCluster) => {
+    setPostListScrollTop(0);
+    setPostListHidden(false);
+    listFilterKeyRef.current = mapFilterKey;
+    setPostListSource(
+      cluster.ghostCountryCode
+        ? {
+            kind: "country",
+            title: `Anywhere in ${cluster.label}`,
+            countryCode: cluster.ghostCountryCode,
+            postCount: cluster.postCount,
+          }
+        : { kind: "cluster", title: cluster.label, postIds: cluster.postIds },
+    );
+  }, [mapFilterKey, setPostListScrollTop, setPostListHidden, setPostListSource]);
+
+  const closePostList = useCallback(() => {
+    setPostListSource(null);
+    setPostListHidden(false);
+    setPostListScrollTop(0);
+  }, [setPostListSource, setPostListHidden, setPostListScrollTop]);
+
+  // A cluster list is a frozen set of post ids, so a filter changed while it was open
+  // would leave it showing trips the filter bar excludes. Its ids are re-checked against
+  // the freshly-loaded map data — which is already filtered — and the list closes if
+  // nothing survives.
+  //
+  // Keyed on the filters rather than on the locations: panning also replaces the loaded
+  // locations, and re-filtering on that would shrink the list as the user moved the map,
+  // which is exactly the "stays as it opened" behaviour this must not break. Re-baselining
+  // the ref after each pass keeps it to one re-filter per filter change.
+  useEffect(() => {
+    if (mapFilterKey === listFilterKeyRef.current) return;
+    if (!postListSource || postListSource.kind !== "cluster" || mapLocations.length === 0) return;
+    listFilterKeyRef.current = mapFilterKey;
+    const stillMatching = new Set(mapLocations.map((location) => location.postId));
+    const postIds = postListSource.postIds.filter((id) => stillMatching.has(id));
+    // Deferred: a synchronous setState inside an effect triggers cascading renders, the
+    // same reason postsStore.ts kicks its refresh through a timeout.
+    const kick = setTimeout(() => {
+      if (postIds.length === 0) closePostList();
+      else if (postIds.length !== postListSource.postIds.length) {
+        setPostListSource({ ...postListSource, postIds });
+      }
+    }, 0);
+    return () => clearTimeout(kick);
+  }, [mapFilterKey, mapLocations, postListSource, closePostList, setPostListSource]);
+
+  // A hero panel (dates, or the more-filters row) opens over the lower half of the screen,
+  // exactly where the sheet lives. Hidden rather than closed, so confirming a filter puts
+  // the user back on the list they were reading.
+  const heroPanelOpen = openHeroField !== null;
+
+  // Tapping a row focuses that post on the map. The sheet is hidden rather than dropped,
+  // so the card's X can bring it straight back with its scroll intact.
+  const focusPostFromList = useCallback(
+    (postId: string) => {
+      setPostListHidden(true);
+      setFocusedMapPostId(postId);
+    },
+    [setPostListHidden, setFocusedMapPostId],
+  );
+
+  // The preview card's X: back to the list if that is where the post came from, otherwise
+  // out to the full map.
+  const clearMapFocus = useCallback(() => {
+    setFocusedMapPostId(null);
+    setPostListHidden(false);
+  }, [setFocusedMapPostId, setPostListHidden]);
   const focusedMapPost = usePostById(focusedMapPostId, posts);
   // Fetched rather than filtered from the loaded set: a trip's other cities are usually
   // off-screen, which is exactly why focusing has to reframe the camera around them.
@@ -1533,7 +1568,7 @@ function HomePageContent() {
                 {/* Hidden, not unmounted, while one of its posts is focused: that keeps the
                     fetched page and the scroll offset alive so closing the post returns to
                     exactly the row the user tapped. */}
-                {postListSource && view === "map" && !postListHidden && (
+                {postListSource && view === "map" && !postListHidden && !heroPanelOpen && (
                   <PostListSheet
                     title={postListSource.title}
                     subtitle={`${postList.total} ${postList.total === 1 ? "trip" : "trips"}`}
