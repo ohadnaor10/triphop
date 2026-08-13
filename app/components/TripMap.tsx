@@ -21,7 +21,7 @@ const MIN_ZOOM = 2;
 const COINCIDENT_CLUSTER_ZOOM = 13;
 // A focused post with a single destination has no extent to fit either — close enough to
 // place the city in its surroundings, not so close that all context is lost.
-const SINGLE_PLACE_FOCUS_ZOOM = 11;
+const SINGLE_PLACE_FOCUS_ZOOM = 9;
 
 // Focusing a post used to also shade its countries with a translucent polygon. Kept, but
 // off: at the zoom focusing lands on, a country-sized fill just tints the whole viewport
