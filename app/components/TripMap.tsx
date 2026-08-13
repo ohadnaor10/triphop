@@ -4,21 +4,21 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef, useState } from "react";
 import { getCountryBoundary } from "../lib/geo";
-import type { MapPoint, MapTier, MapViewport } from "../lib/mapStore";
+import type { MapCluster } from "../lib/cluster";
+import type { MapViewport } from "../lib/mapStore";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const BOUNDARY_SOURCE_ID = "trip-map-focused-boundaries";
 const BOUNDARY_FILL_LAYER = `${BOUNDARY_SOURCE_ID}-fill`;
 const BOUNDARY_LINE_LAYER = `${BOUNDARY_SOURCE_ID}-line`;
 
-// Where tapping an aggregate bubble takes the camera: just past the zoom at which the
-// server switches to the next tier (see supabase/migrations/0016_search_posts_map.sql),
-// so one tap always visibly breaks the bubble apart rather than redrawing the same one.
-const NEXT_TIER_ZOOM: Record<Exclude<MapTier, "post">, number> = {
-  region: 3.2,
-  country: 5.2,
-  place: 8.2,
-};
+// How far out the map can be zoomed. Below this the whole globe (and then copies of it)
+// fits on screen, where every marker collapses into a handful of meaningless blobs and
+// panning stops meaning anything — so the camera simply doesn't go there.
+const MIN_ZOOM = 2;
+// Fallback for tapping a cluster whose members share one exact coordinate: its bounds are
+// a single point, so there is nothing to fit the camera to.
+const COINCIDENT_CLUSTER_ZOOM = 13;
 
 type BoundaryFeature = GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
 
@@ -52,25 +52,25 @@ function createPinElement(focused: boolean): HTMLDivElement {
 
 // Aggregate tiers render as a count bubble rather than a pin: at continent/country/city
 // zoom the exact coordinate is meaningless, and the number is the actual information.
-function createBubbleElement(point: MapPoint): HTMLDivElement {
+function createBubbleElement(cluster: MapCluster): HTMLDivElement {
   const wrapper = document.createElement("div");
   wrapper.style.cursor = "pointer";
   // Area, not diameter, tracks the count — sqrt keeps a 100-post bubble from dwarfing a
   // 10-post one by a factor of ten.
-  const size = Math.min(64, 34 + Math.sqrt(point.postCount) * 4);
+  const size = Math.min(64, 34 + Math.sqrt(cluster.postCount) * 4);
   wrapper.style.cssText = `width:${size}px;height:${size}px;border-radius:9999px;background:rgba(249,115,22,0.92);
     color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;
     border:2px solid #fff;box-shadow:0 2px 6px rgba(15,23,42,0.35);cursor:pointer;`;
   const count = document.createElement("span");
-  count.textContent = String(point.postCount);
+  count.textContent = String(cluster.postCount);
   count.style.cssText = "font-size:13px;font-weight:800;";
   wrapper.appendChild(count);
-  wrapper.title = `${point.label} · ${point.postCount} ${point.postCount === 1 ? "trip" : "trips"}`;
+  wrapper.title = `${cluster.label} · ${cluster.postCount} ${cluster.postCount === 1 ? "trip" : "trips"}`;
   return wrapper;
 }
 
 export type TripMapProps = {
-  points: MapPoint[];
+  clusters: MapCluster[];
   focusedPostId: string | null;
   /** Country codes of the focused post, highlighted as boundary polygons. */
   focusedCountryCodes: string[];
@@ -82,7 +82,7 @@ export type TripMapProps = {
 };
 
 export default function TripMap({
-  points,
+  clusters,
   focusedPostId,
   focusedCountryCodes,
   onSelectPost,
@@ -116,7 +116,8 @@ export default function TripMap({
       container: containerRef.current,
       style: "mapbox://styles/mapbox/streets-v12",
       center: [10, 20],
-      zoom: 1.5,
+      zoom: MIN_ZOOM,
+      minZoom: MIN_ZOOM,
     });
     map.addControl(new mapboxgl.NavigationControl(), "top-right");
 
@@ -173,36 +174,47 @@ export default function TripMap({
     if (!map || !isStyleLoaded) return;
 
     // Always clear the previous render's markers before placing new ones — otherwise a
-    // point that drops out of `points` (panned away, filtered out, or collapsed into a
-    // different tier) would leave its marker stranded on the map.
+    // marker that drops out of `clusters` (panned away, filtered out, or merged into a
+    // neighbour) would be left stranded on the map.
     markersRef.current.forEach((m) => m.remove());
     const markers: mapboxgl.Marker[] = [];
 
-    for (const point of points) {
-      const isPostPin = point.tier === "post" && point.postId;
-      const element = isPostPin
-        ? createPinElement(point.postId === focusedPostId)
-        : createBubbleElement(point);
+    for (const cluster of clusters) {
+      // A cluster of one is just a post — draw it as a pin and open it on tap.
+      const isSinglePost = cluster.postId !== null;
+      const element = isSinglePost
+        ? createPinElement(cluster.postId === focusedPostId)
+        : createBubbleElement(cluster);
 
       element.addEventListener("click", (e) => {
         e.stopPropagation();
-        if (isPostPin && point.postId) {
-          onSelectPostRef.current(point.postId);
+        if (isSinglePost && cluster.postId) {
+          onSelectPostRef.current(cluster.postId);
           return;
         }
-        // Tapping an aggregate drills in one tier rather than opening anything — the
-        // bubble is a "there are N trips here", and the way to see them is to zoom.
-        map.easeTo({
-          center: [point.lng, point.lat],
-          zoom: NEXT_TIER_ZOOM[point.tier as Exclude<MapTier, "post">],
-          duration: 700,
-          essential: true,
-        });
+
+        const [minLng, minLat, maxLng, maxLat] = cluster.bounds;
+        // Zoom to the cluster's own extent rather than to a fixed step, so one tap opens
+        // exactly this group and no more — a tight knot of towns needs far more zoom than
+        // a loose pair of cities, and a fixed step gets both wrong.
+        if (minLng === maxLng && minLat === maxLat) {
+          // Every member sits on the same coordinate, so no amount of zoom separates them
+          // and fitBounds has nothing to fit.
+          map.easeTo({ center: [cluster.lng, cluster.lat], zoom: COINCIDENT_CLUSTER_ZOOM, duration: 700, essential: true });
+          return;
+        }
+        map.fitBounds(
+          [
+            [minLng, minLat],
+            [maxLng, maxLat],
+          ],
+          { padding: 80, maxZoom: 15, duration: 700, essential: true },
+        );
       });
 
       markers.push(
-        new mapboxgl.Marker({ element, anchor: isPostPin ? "bottom" : "center" })
-          .setLngLat([point.lng, point.lat])
+        new mapboxgl.Marker({ element, anchor: isSinglePost ? "bottom" : "center" })
+          .setLngLat([cluster.lng, cluster.lat])
           .addTo(map),
       );
     }
@@ -213,7 +225,7 @@ export default function TripMap({
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
     };
-  }, [points, focusedPostId, isStyleLoaded]);
+  }, [clusters, focusedPostId, isStyleLoaded]);
 
   // Country boundary highlight for the focused post. No camera move: the user tapped a
   // pin they could already see, and moving the camera would change the viewport and

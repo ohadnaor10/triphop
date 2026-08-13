@@ -1,6 +1,7 @@
 import dynamic from "next/dynamic";
 import { IconX } from "./icons";
-import type { MapPoint, MapViewport } from "../lib/mapStore";
+import type { MapCluster } from "../lib/cluster";
+import type { MapViewport } from "../lib/mapStore";
 import Avatar from "./Avatar";
 import type { Post } from "../page";
 
@@ -12,11 +13,11 @@ const TripMap = dynamic(() => import("./TripMap"), {
 });
 
 export type FeedMapViewProps = {
-  points: MapPoint[];
+  clusters: MapCluster[];
   /** Total posts matching the filters, ignoring the viewport. */
   totalCount: number;
-  /** True when the server capped its rows and the map is showing a subset. */
-  truncated: boolean;
+  /** True when the viewport was too dense to ship in full and server-side grouping stood in. */
+  overviewMode: boolean;
   onViewportChange: (viewport: MapViewport) => void;
   initialBounds: [number, number, number, number] | null;
   focusedMapPostId: string | null;
@@ -31,9 +32,9 @@ export type FeedMapViewProps = {
 };
 
 export function FeedMapView({
-  points,
+  clusters,
   totalCount,
-  truncated,
+  overviewMode,
   onViewportChange,
   initialBounds,
   focusedMapPostId,
@@ -52,14 +53,14 @@ export function FeedMapView({
         <h1 className="text-lg font-bold text-slate-900">Where trips are happening</h1>
         <p className="text-xs text-slate-500">
           {totalCount > 0
-            ? `${totalCount} ${totalCount === 1 ? "trip" : "trips"} match your filters. Zoom in to break the groups apart.`
+            ? `${totalCount} ${totalCount === 1 ? "trip" : "trips"} match your filters. Tap a group to zoom into it.`
             : "Tap a pin to see who's heading there."}
         </p>
       </div>
 
       <div className="relative h-[420px] overflow-hidden rounded-2xl border border-slate-200">
         <TripMap
-          points={points}
+          clusters={clusters}
           focusedPostId={focusedMapPostId}
           focusedCountryCodes={focusedCountryCodes}
           onSelectPost={(id) => setFocusedMapPostId(id)}
@@ -118,8 +119,8 @@ export function FeedMapView({
       {/* Says so out loud when the viewport holds more than the server will return, rather
           than quietly showing a subset — the failure the old feed-derived map had. */}
       <p className="px-1 text-center text-xs text-slate-400">
-        {truncated
-          ? "Showing the busiest trips in this area — zoom in to see them all."
+        {overviewMode
+          ? "Too many trips in view to place individually — zoom in for exact pins."
           : "Tap a pin to preview that trip and message on WhatsApp."}
       </p>
     </div>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Post } from "../page";
+import type { MapLocation } from "./cluster";
 import { colorFor, type PostsFilters } from "./postsStore";
 import { hasActiveDateSearch } from "./relevance";
 import { useClerkSupabaseClient } from "./supabase/useClerkSupabaseClient";
@@ -13,16 +14,14 @@ import { useClerkSupabaseClient } from "./supabase/useClerkSupabaseClient";
 
 export type MapTier = "region" | "country" | "place" | "post";
 
-export type MapPoint = {
+/** An already-grouped marker from the server, used only in the over-cap overview mode. */
+export type MapAggregate = {
   tier: MapTier;
-  /** Stable identity for this marker within its tier — region name, ISO code, place id, or postId:placeId. */
   key: string;
   label: string;
   lat: number;
   lng: number;
   postCount: number;
-  /** Set only on the "post" tier; null on aggregates. */
-  postId: string | null;
 };
 
 export type MapViewport = {
@@ -34,25 +33,27 @@ export type MapViewport = {
 };
 
 export type MapPointsStore = {
-  points: MapPoint[];
-  /** Total posts matching the filters, ignoring the viewport — for honest truncation copy. */
+  /**
+   * Raw one-row-per-(post, place) locations for the viewport. The client clusters these
+   * by on-screen distance (see app/lib/cluster.ts) — the server deliberately does no
+   * grouping, because how far apart two markers *look* is only knowable client-side.
+   */
+  locations: MapLocation[];
+  /**
+   * Non-null only when the viewport holds more locations than are sensible to ship, in
+   * which case the server's zoom-tier aggregation stands in. Counts stay exact; only the
+   * grouping gets coarser.
+   */
+  overview: MapAggregate[] | null;
+  /** Total posts matching the filters, ignoring the viewport — for honest copy. */
   totalCount: number;
   loading: boolean;
-  /** True when the server hit its row cap and the viewport is showing a subset. */
-  truncated: boolean;
 };
 
-// Matches the server's tier thresholds in supabase/migrations/0016_search_posts_map.sql.
-// Duplicated rather than fetched because it's needed synchronously, before any request,
-// to decide whether a small pan can reuse the cached response.
-function tierForZoom(zoom: number): MapTier {
-  if (zoom < 3) return "region";
-  if (zoom < 5) return "country";
-  if (zoom < 8) return "place";
-  return "post";
-}
-
-const ROW_CAP = 500;
+// Locations per viewport before falling back to server-side aggregation. Rows are two
+// floats and two ids, so this is a small payload; the real limit is how many markers the
+// clustering pass can chew through on a phone between gestures.
+const LOCATION_CAP = 3000;
 const MOVE_DEBOUNCE_MS = 300;
 // Fetch a viewport this much larger than what's on screen, so short pans are served from
 // the response already in hand instead of firing a request per nudge.
@@ -77,7 +78,7 @@ function padViewport(viewport: MapViewport): MapViewport {
 function isInside(inner: MapViewport, outer: MapViewport): boolean {
   // Only a plain, non-wrapping comparison is treated as "covered": once either box
   // crosses the antimeridian the containment test stops being a simple inequality, and
-  // wrongly claiming coverage would leave the map showing stale pins.
+  // wrongly claiming coverage would leave the map showing stale markers.
   if (outer.minLng > outer.maxLng || inner.minLng > inner.maxLng) return false;
   return (
     inner.minLat >= outer.minLat &&
@@ -87,31 +88,25 @@ function isInside(inner: MapViewport, outer: MapViewport): boolean {
   );
 }
 
-type MapRow = {
-  tier: MapTier;
-  key: string;
-  label: string;
-  lat: number;
-  lng: number;
-  post_count: number;
-  post_id: string | null;
-};
+type LocationRow = { post_id: string; place_id: number; label: string; lat: number; lng: number };
+type AggregateRow = { tier: MapTier; key: string; label: string; lat: number; lng: number; post_count: number };
 
 export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null): MapPointsStore {
   const supabase = useClerkSupabaseClient();
-  const [points, setPoints] = useState<MapPoint[]>([]);
+  const [locations, setLocations] = useState<MapLocation[]>([]);
+  const [overview, setOverview] = useState<MapAggregate[] | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [truncated, setTruncated] = useState(false);
 
   // Whichever request started most recently wins. Panning fires overlapping requests and
   // they don't come back in order — without this, a slow early response can land after a
   // fast later one and repaint the map with the area the user already left. Same guard
   // postsStore.ts uses for refresh/loadMore.
   const requestIdRef = useRef(0);
-  // The padded box (and tier) the current `points` were fetched for, so a pan that stays
-  // inside it can skip the round trip entirely.
-  const coverageRef = useRef<{ viewport: MapViewport; tier: MapTier } | null>(null);
+  // The padded box the current locations were fetched for, so a pan that stays inside it
+  // can skip the round trip entirely. Zoom is not part of this: the server returns raw
+  // locations regardless of zoom now, and re-clustering them is a pure client-side pass.
+  const coverageRef = useRef<MapViewport | null>(null);
 
   const activeDateSearch = filters.dateSearch && hasActiveDateSearch(filters.dateSearch) ? filters.dateSearch : null;
   // Destination is absent by design — on the map, the viewport is the destination filter.
@@ -135,51 +130,73 @@ export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null
 
   const fetchPoints = useCallback(
     async (target: MapViewport) => {
-      const tier = tierForZoom(target.zoom);
       const covered = coverageRef.current;
-      if (covered && covered.tier === tier && isInside(target, covered.viewport)) return;
+      if (covered && isInside(target, covered)) return;
 
       const padded = padViewport(target);
       const requestId = ++requestIdRef.current;
       setLoading(true);
 
       const params = JSON.parse(filterKey) as typeof filterParams;
+      const bbox = {
+        p_min_lng: padded.minLng,
+        p_min_lat: padded.minLat,
+        p_max_lng: padded.maxLng,
+        p_max_lat: padded.maxLat,
+      };
       const [pointsResult, countResult] = await Promise.all([
-        supabase.rpc("search_posts_map", {
-          ...params,
-          p_min_lng: padded.minLng,
-          p_min_lat: padded.minLat,
-          p_max_lng: padded.maxLng,
-          p_max_lat: padded.maxLat,
-          p_zoom: target.zoom,
-          p_limit: ROW_CAP,
-        }),
+        supabase.rpc("search_posts_map_points", { ...params, ...bbox, p_limit: LOCATION_CAP }),
         supabase.rpc("count_posts_map", params),
       ]);
 
       if (requestId !== requestIdRef.current) return; // superseded by a newer viewport
 
       if (pointsResult.error) {
-        console.error("Failed to load map points:", pointsResult.error.message);
+        console.error("Failed to load map locations:", pointsResult.error.message);
         setLoading(false);
         return;
       }
 
-      const rows = (pointsResult.data as MapRow[] | null) ?? [];
-      setPoints(
-        rows.map((row) => ({
-          tier: row.tier,
-          key: row.key,
-          label: row.label,
-          lat: row.lat,
-          lng: row.lng,
-          postCount: Number(row.post_count),
-          postId: row.post_id,
-        })),
-      );
-      setTruncated(rows.length >= ROW_CAP);
+      const rows = (pointsResult.data as LocationRow[] | null) ?? [];
+
+      if (rows.length >= LOCATION_CAP) {
+        // Too dense to ship in full. Rather than clustering a truncated sample — which
+        // would render confident-looking counts computed from part of the data — hand
+        // over to the server's tiered aggregation, whose counts are exact.
+        const aggregateResult = await supabase.rpc("search_posts_map", {
+          ...params,
+          ...bbox,
+          p_zoom: target.zoom,
+          p_limit: 500,
+        });
+        if (requestId !== requestIdRef.current) return;
+        const aggregates = (aggregateResult.data as AggregateRow[] | null) ?? [];
+        setOverview(
+          aggregates.map((row) => ({
+            tier: row.tier,
+            key: row.key,
+            label: row.label,
+            lat: row.lat,
+            lng: row.lng,
+            postCount: Number(row.post_count),
+          })),
+        );
+        setLocations([]);
+      } else {
+        setOverview(null);
+        setLocations(
+          rows.map((row) => ({
+            postId: row.post_id,
+            placeId: String(row.place_id),
+            label: row.label,
+            lat: row.lat,
+            lng: row.lng,
+          })),
+        );
+      }
+
       if (!countResult.error) setTotalCount(Number(countResult.data ?? 0));
-      coverageRef.current = { viewport: padded, tier };
+      coverageRef.current = padded;
       setLoading(false);
     },
     [supabase, filterKey],
@@ -192,7 +209,7 @@ export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null
     return () => clearTimeout(timer);
   }, [viewport, fetchPoints]);
 
-  return { points, totalCount, loading, truncated };
+  return { locations, overview, totalCount, loading };
 }
 
 type PostRow = {

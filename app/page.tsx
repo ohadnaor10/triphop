@@ -30,6 +30,7 @@ import {
 import { hasActiveDateSearch, type DateSearchInput } from "./lib/relevance";
 import { useAuth } from "./context/AuthContext";
 import { useUnreadMessageCount } from "./lib/messagesStore";
+import { clusterLocations } from "./lib/cluster";
 import { useFocusedMapPost, useMapPoints, type MapViewport } from "./lib/mapStore";
 import { usePostsStore, type PostsFilters } from "./lib/postsStore";
 import { useClerkSupabaseClient } from "./lib/supabase/useClerkSupabaseClient";
@@ -1092,7 +1093,32 @@ function HomePageContent() {
   // meant the map's contents depended on how far the user had scrolled the feed first.
   const [mapViewport, setMapViewport] = useState<MapViewport | null>(null);
   const [focusedMapPostId, setFocusedMapPostId] = useState<string | null>(null);
-  const { points: mapPoints, totalCount: mapTotalCount, truncated: mapTruncated } = useMapPoints(filters, mapViewport);
+  const { locations: mapLocations, overview: mapOverview, totalCount: mapTotalCount } = useMapPoints(
+    filters,
+    mapViewport,
+  );
+
+  // Grouping happens here, not on the server: whether two markers are far enough apart to
+  // draw separately is a question about pixels on this screen at this zoom, which only the
+  // client can answer. Recomputed on zoom change (and when the fetched set changes), not
+  // during a gesture — Mapbox moves existing markers with the map on its own.
+  const mapClusters = useMemo(() => {
+    if (mapOverview) {
+      // Over-cap fallback: the server already grouped these, so they pass straight through
+      // as one-marker-per-aggregate with no bounds to zoom into.
+      return mapOverview.map((aggregate) => ({
+        key: aggregate.key,
+        label: aggregate.label,
+        lat: aggregate.lat,
+        lng: aggregate.lng,
+        postCount: aggregate.postCount,
+        locationCount: aggregate.postCount,
+        postId: null,
+        bounds: [aggregate.lng, aggregate.lat, aggregate.lng, aggregate.lat] as [number, number, number, number],
+      }));
+    }
+    return clusterLocations(mapLocations, mapViewport?.zoom ?? 2);
+  }, [mapLocations, mapOverview, mapViewport?.zoom]);
   const focusedMapPost = useFocusedMapPost(focusedMapPostId, posts);
   const focusedMapCountryCodes = useMemo(
     () =>
@@ -1369,9 +1395,9 @@ function HomePageContent() {
           />
         ) : (
           <FeedMapView
-            points={mapPoints}
+            clusters={mapClusters}
             totalCount={mapTotalCount}
-            truncated={mapTruncated}
+            overviewMode={mapOverview !== null}
             onViewportChange={setMapViewport}
             initialBounds={mapInitialBounds}
             focusedMapPostId={focusedMapPostId}
