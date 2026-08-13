@@ -88,7 +88,16 @@ function isInside(inner: MapViewport, outer: MapViewport): boolean {
   );
 }
 
-type LocationRow = { post_id: string; place_id: number; label: string; lat: number; lng: number };
+type LocationRow = {
+  post_id: string;
+  place_id: number;
+  label: string;
+  lat: number;
+  lng: number;
+  author_name: string | null;
+  author_avatar_url: string | null;
+  author_avatar_color: string | null;
+};
 type AggregateRow = { tier: MapTier; key: string; label: string; lat: number; lng: number; post_count: number };
 
 export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null): MapPointsStore {
@@ -191,6 +200,9 @@ export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null
             label: row.label,
             lat: row.lat,
             lng: row.lng,
+            authorName: row.author_name ?? "Traveler",
+            authorAvatarUrl: row.author_avatar_url,
+            authorAvatarColor: row.author_avatar_color,
           })),
         );
       }
@@ -210,6 +222,58 @@ export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null
   }, [viewport, fetchPoints]);
 
   return { locations, overview, totalCount, loading };
+}
+
+export type FocusedPlace = { label: string; lat: number; lng: number };
+
+type FocusedPlaceRow = { places: { name: string; lat: number; lng: number } | null };
+
+// Every destination of the focused post, including the ones outside the current viewport.
+//
+// Fetched separately rather than filtered out of the loaded locations: a trip's other
+// cities are frequently off-screen (that's rather the point of focusing on it), so the
+// in-view set can't answer this. One small query per tap, against tables that are already
+// publicly readable.
+export function useFocusedPostPlaces(postId: string | null): FocusedPlace[] {
+  const supabase = useClerkSupabaseClient();
+  // Result and the id it belongs to are one piece of state, so "which post are these for?"
+  // can be answered during render instead of being cleared by a second effect — clearing
+  // it synchronously in an effect is both a cascading render and a lint error here.
+  const [loaded, setLoaded] = useState<{ postId: string | null; places: FocusedPlace[] }>({
+    postId: null,
+    places: [],
+  });
+
+  useEffect(() => {
+    if (!postId) return;
+    let cancelled = false;
+    supabase
+      .from("post_places")
+      .select("places(name, lat, lng)")
+      .eq("post_id", postId)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to load places for focused post:", error.message);
+          return;
+        }
+        const rows = (data as unknown as FocusedPlaceRow[] | null) ?? [];
+        setLoaded({
+          postId,
+          places: rows
+            .map((row) => row.places)
+            .filter((place): place is NonNullable<FocusedPlaceRow["places"]> => place !== null)
+            .map((place) => ({ label: place.name, lat: place.lat, lng: place.lng })),
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [postId, supabase]);
+
+  // Guards against a flash of the previous post's pins while the new ones are in flight,
+  // and empties the moment focus is cleared.
+  return loaded.postId === postId ? loaded.places : [];
 }
 
 type PostRow = {

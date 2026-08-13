@@ -1,7 +1,7 @@
 import dynamic from "next/dynamic";
 import { IconX } from "./icons";
 import type { MapCluster } from "../lib/cluster";
-import type { MapViewport } from "../lib/mapStore";
+import type { FocusedPlace, MapViewport } from "../lib/mapStore";
 import Avatar from "./Avatar";
 import type { Post } from "../page";
 
@@ -21,6 +21,8 @@ export type FeedMapViewProps = {
   onViewportChange: (viewport: MapViewport) => void;
   initialBounds: [number, number, number, number] | null;
   focusedMapPostId: string | null;
+  /** Destinations of the focused post; while non-empty the map shows only these. */
+  focusedPlaces: FocusedPlace[];
   focusedCountryCodes: string[];
   setFocusedMapPostId: (id: string | null) => void;
   focusedMapPost: Post | null;
@@ -38,6 +40,7 @@ export function FeedMapView({
   onViewportChange,
   initialBounds,
   focusedMapPostId,
+  focusedPlaces,
   focusedCountryCodes,
   setFocusedMapPostId,
   focusedMapPost,
@@ -54,7 +57,7 @@ export function FeedMapView({
         <p className="text-xs text-slate-500">
           {totalCount > 0
             ? `${totalCount} ${totalCount === 1 ? "trip" : "trips"} match your filters. Tap a group to zoom into it.`
-            : "Tap a pin to see who's heading there."}
+            : "Tap someone's photo to see where they're heading."}
         </p>
       </div>
 
@@ -62,6 +65,7 @@ export function FeedMapView({
         <TripMap
           clusters={clusters}
           focusedPostId={focusedMapPostId}
+          focusedPlaces={focusedPlaces}
           focusedCountryCodes={focusedCountryCodes}
           onSelectPost={(id) => setFocusedMapPostId(id)}
           onViewportChange={onViewportChange}
@@ -121,7 +125,9 @@ export function FeedMapView({
       <p className="px-1 text-center text-xs text-slate-400">
         {overviewMode
           ? "Too many trips in view to place individually — zoom in for exact pins."
-          : "Tap a pin to preview that trip and message on WhatsApp."}
+          : focusedMapPostId
+            ? "Showing this trip's destinations only — close the card to see everyone again."
+            : "Tap someone's photo to preview their trip and message on WhatsApp."}
       </p>
     </div>
   );

@@ -20,6 +20,10 @@ export type MapLocation = {
   label: string;
   lat: number;
   lng: number;
+  /** The poster, carried through so a single-post marker can draw their avatar. */
+  authorName: string;
+  authorAvatarUrl: string | null;
+  authorAvatarColor: string | null;
 };
 
 export type MapCluster = {
@@ -32,6 +36,8 @@ export type MapCluster = {
   locationCount: number;
   /** Set only when this cluster is a single location, so the caller can open that post directly. */
   postId: string | null;
+  /** Present alongside postId — a lone marker renders as its author's avatar, not a pin. */
+  author: { name: string; avatarUrl: string | null; avatarColor: string | null } | null;
   /** [minLng, minLat, maxLng, maxLat] of the members, for zooming a cluster open. */
   bounds: [number, number, number, number];
 };
@@ -65,6 +71,7 @@ type WorkingCluster = {
   postIds: Set<string>;
   label: string;
   postId: string | null;
+  author: { name: string; avatarUrl: string | null; avatarColor: string | null };
   minLng: number;
   minLat: number;
   maxLng: number;
@@ -222,6 +229,11 @@ export function clusterLocations(
     postIds: new Set([location.postId]),
     label: location.label,
     postId: location.postId,
+    author: {
+      name: location.authorName,
+      avatarUrl: location.authorAvatarUrl,
+      avatarColor: location.authorAvatarColor,
+    },
     minLng: location.lng,
     minLat: location.lat,
     maxLng: location.lng,
@@ -288,6 +300,7 @@ export function clusterLocations(
       postCount: cluster.postIds.size,
       locationCount: cluster.locationCount,
       postId: cluster.locationCount === 1 ? cluster.postId : null,
+      author: cluster.locationCount === 1 ? cluster.author : null,
       bounds: [cluster.minLng, cluster.minLat, cluster.maxLng, cluster.maxLat] as [number, number, number, number],
     }));
 }

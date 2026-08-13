@@ -10,8 +10,11 @@
 //     concentrated, and a map that looks fine under uniform noise can still fall apart
 //     on the pile-up that concentration produces.
 //
-// Every post belongs to one synthetic profile (MOCK_USER_ID), which makes cleanup a
-// single delete: posts and post_places both cascade from profiles.
+// Posts are spread across MOCK_PROFILE_COUNT synthetic profiles rather than owned by one.
+// A single owner made every marker on the map draw the same avatar, which hid exactly the
+// thing avatars are there to show — and made the map read as broken rather than as sparse.
+// All the ids share one prefix, so cleanup is still one statement:
+//   delete from profiles where id like 'mock-load-user-%';
 //
 // Deterministic: a fixed PRNG seed means re-running produces byte-identical output, so
 // the emitted SQL is reviewable and reproducible rather than a fresh random blob each time.
@@ -20,7 +23,7 @@
 //   node scripts/generate-mock-posts.mjs --emit-sql   # writes a migration (no DB access)
 //   node scripts/generate-mock-posts.mjs --stats      # prints the distribution only
 // Cleanup once you're done inspecting:
-//   delete from profiles where id = 'mock-load-user';
+//   delete from profiles where id like 'mock-load-user-%';
 
 import fs from "node:fs";
 import path from "node:path";
@@ -29,9 +32,16 @@ import { City, Country } from "country-state-city";
 import worldCountries from "world-countries";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const OUTPUT_PATH = path.join(__dirname, "..", "supabase", "migrations", "0019_mock_load_posts.sql");
+// Default target is the migration this script originally produced. Overwriting an
+// already-applied migration is how environments silently diverge, so an existing file is
+// never clobbered without --force; pass --out=<path> to emit a new migration instead.
+const OUTPUT_ARG = process.argv.find((arg) => arg.startsWith("--out="));
+const OUTPUT_PATH = OUTPUT_ARG
+  ? path.resolve(OUTPUT_ARG.slice("--out=".length))
+  : path.join(__dirname, "..", "supabase", "migrations", "0019_mock_load_posts.sql");
 
-const MOCK_USER_ID = "mock-load-user";
+const MOCK_USER_PREFIX = "mock-load-user";
+const MOCK_PROFILE_COUNT = 20;
 const RANDOM_POST_COUNT = 300;
 const THAILAND_POST_COUNT = 100;
 // Enforced as a count rather than a per-post probability: "at least 70%" should be a
@@ -117,6 +127,39 @@ const THAI_CITIES = [
 const THAI_LONG_TAIL_CHANCE = 0.12;
 
 const VIBES = ["Backpacking", "Road Trip", "Luxury", "Chill", "Adventure", "Culture"];
+
+// The same gradients real profiles get (AVATAR_COLORS in app/lib/postsStore.ts), so the
+// mock avatars are drawn from the same palette the app actually uses.
+const AVATAR_COLORS = [
+  "bg-gradient-to-br from-orange-400 to-pink-500",
+  "bg-gradient-to-br from-sky-400 to-indigo-500",
+  "bg-gradient-to-br from-emerald-400 to-teal-500",
+  "bg-gradient-to-br from-fuchsia-400 to-purple-500",
+];
+
+// Distinct initials matter more than distinct names here: none of these profiles has a
+// photo, so the avatar circle falls back to initials, and repeated initials would defeat
+// the point of spreading the posts out in the first place.
+const MOCK_NAMES = [
+  "Alma Reyes", "Boris Novak", "Carla Dominguez", "Dane Okafor", "Elif Yilmaz",
+  "Felix Brandt", "Gaia Marino", "Hugo Lindqvist", "Iris Delacroix", "Jonah Weiss",
+  "Kira Petrova", "Liam O'Donnell", "Maya Sharma", "Nils Andersen", "Olive Barnes",
+  "Pablo Herrera", "Quinn Fraser", "Rania Haddad", "Sofia Duarte", "Tobias Meyer",
+];
+
+function mockProfiles() {
+  return MOCK_NAMES.slice(0, MOCK_PROFILE_COUNT).map((name, index) => ({
+    id: `${MOCK_USER_PREFIX}-${String(index + 1).padStart(2, "0")}`,
+    name,
+    age: 22 + ((index * 3) % 22),
+    gender: index % 2 === 0 ? "Female" : "Male",
+    avatarColor: AVATAR_COLORS[index % AVATAR_COLORS.length],
+    whatsapp: `1000000${String(900 + index)}`,
+    birthDate: `${2026 - (22 + ((index * 3) % 22))}-06-15`,
+  }));
+}
+
+const MOCK_PROFILES = mockProfiles();
 
 // One bio carries the overwhelming majority of these posts on purpose: they exist to be
 // looked at on a map, not read, and identical text makes a mock post obvious at a glance
@@ -235,7 +278,9 @@ function buildAll() {
   const posts = [];
   for (let i = 0; i < RANDOM_POST_COUNT; i++) posts.push(buildRandomPost());
   posts.push(...buildThailandPosts());
-  return posts;
+  // Round-robin rather than random, so every profile carries a similar share and no
+  // single avatar dominates the map by accident.
+  return posts.map((post, index) => ({ ...post, userId: MOCK_PROFILES[index % MOCK_PROFILES.length].id }));
 }
 
 // ---------- Output ----------
@@ -248,9 +293,14 @@ function writeMigration(posts) {
   const rows = posts
     .map(
       (p) =>
-        `  (${sqlString(MOCK_USER_ID)}, ${sqlJson(p.destinations)}, ${sqlJson(p.date)}, ${sqlTextArray(p.vibes)}, ${sqlString(p.bio)})`,
+        `  (${sqlString(p.userId)}, ${sqlJson(p.destinations)}, ${sqlJson(p.date)}, ${sqlTextArray(p.vibes)}, ${sqlString(p.bio)})`,
     )
     .join(",\n");
+
+  const profileRows = MOCK_PROFILES.map(
+    (profile) =>
+      `  (${sqlString(profile.id)}, ${sqlString(profile.name)}, ${profile.age}, ${sqlString(profile.gender)}, ${sqlString(profile.avatarColor)}, ${sqlString(profile.whatsapp)}, ${sqlString(profile.birthDate)})`,
+  ).join(",\n");
 
   const sql = `-- Generated by scripts/generate-mock-posts.mjs — do not hand-edit.
 -- ${posts.length} mock posts (${RANDOM_POST_COUNT} spread across random countries, ${THAILAND_POST_COUNT} concentrated in
@@ -258,12 +308,12 @@ function writeMigration(posts) {
 -- realistic volume. All owned by one synthetic profile, so cleanup is a single delete.
 --
 -- Not real content: every one of these carries a "Mock post for map testing" bio.
+-- Spread across ${MOCK_PROFILE_COUNT} synthetic profiles so the map's avatar markers actually differ.
 -- To remove them all, including their places links (both cascade from profiles):
---   delete from profiles where id = '${MOCK_USER_ID}';
+--   delete from profiles where id like '${MOCK_USER_PREFIX}-%';
 
-insert into profiles (id, name, age, gender, avatar_color, whatsapp, birth_date)
-values (${sqlString(MOCK_USER_ID)}, 'Map Load Test', 30, 'Male',
-        'bg-gradient-to-br from-slate-400 to-slate-600', '10000000999', '1996-06-15')
+insert into profiles (id, name, age, gender, avatar_color, whatsapp, birth_date) values
+${profileRows}
 on conflict (id) do nothing;
 
 insert into posts (user_id, destinations, date, vibes, bio) values
@@ -283,10 +333,16 @@ join places pl
   on pl.country_code = upper(btrim(d->>'countryCode'))
  and lower(btrim(pl.name)) = lower(btrim(city))
 where d->>'mode' = 'focused'
-  and p.user_id = ${sqlString(MOCK_USER_ID)}
+  and p.user_id like ${sqlString(MOCK_USER_PREFIX + "-%")}
 on conflict do nothing;
 `;
 
+  if (fs.existsSync(OUTPUT_PATH) && !process.argv.includes("--force")) {
+    console.error(
+      `[generate-mock-posts] ${path.relative(process.cwd(), OUTPUT_PATH)} already exists. It may already be applied — pass --out=<path> to write a new migration, or --force to overwrite.`,
+    );
+    process.exit(1);
+  }
   fs.writeFileSync(OUTPUT_PATH, sql);
   console.log(`[generate-mock-posts] wrote ${posts.length} posts to ${path.relative(process.cwd(), OUTPUT_PATH)}`);
 }

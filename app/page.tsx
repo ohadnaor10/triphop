@@ -31,7 +31,7 @@ import { hasActiveDateSearch, type DateSearchInput } from "./lib/relevance";
 import { useAuth } from "./context/AuthContext";
 import { useUnreadMessageCount } from "./lib/messagesStore";
 import { clusterLocations } from "./lib/cluster";
-import { useFocusedMapPost, useMapPoints, type MapViewport } from "./lib/mapStore";
+import { useFocusedMapPost, useFocusedPostPlaces, useMapPoints, type MapViewport } from "./lib/mapStore";
 import { usePostsStore, type PostsFilters } from "./lib/postsStore";
 import { useClerkSupabaseClient } from "./lib/supabase/useClerkSupabaseClient";
 
@@ -1114,12 +1114,18 @@ function HomePageContent() {
         postCount: aggregate.postCount,
         locationCount: aggregate.postCount,
         postId: null,
+        // Aggregates are always groups, never a single post, so there is no one author
+        // to draw an avatar for.
+        author: null,
         bounds: [aggregate.lng, aggregate.lat, aggregate.lng, aggregate.lat] as [number, number, number, number],
       }));
     }
     return clusterLocations(mapLocations, mapViewport?.zoom ?? 2);
   }, [mapLocations, mapOverview, mapViewport?.zoom]);
   const focusedMapPost = useFocusedMapPost(focusedMapPostId, posts);
+  // Fetched rather than filtered from the loaded set: a trip's other cities are usually
+  // off-screen, which is exactly why focusing has to reframe the camera around them.
+  const focusedMapPlaces = useFocusedPostPlaces(focusedMapPostId);
   const focusedMapCountryCodes = useMemo(
     () =>
       focusedMapPost
@@ -1401,6 +1407,7 @@ function HomePageContent() {
             onViewportChange={setMapViewport}
             initialBounds={mapInitialBounds}
             focusedMapPostId={focusedMapPostId}
+            focusedPlaces={focusedMapPlaces}
             focusedCountryCodes={focusedMapCountryCodes}
             setFocusedMapPostId={setFocusedMapPostId}
             focusedMapPost={focusedMapPost}
