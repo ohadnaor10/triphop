@@ -33,8 +33,23 @@ export type PostListSheetProps = {
 //
 // A sheet rather than a full-screen overlay: the map above stays visible and interactive,
 // so the list keeps the spatial context it came from.
-const COLLAPSED_HEIGHT_VH = 60;
-const EXPANDED_HEIGHT_VH = 92;
+//
+// Three heights rather than two. Dragging down used to dismiss the sheet, which made
+// "I want to see more of the map for a second" and "I'm done with this list" the same
+// gesture — and the second one throws away your place in a 79-row list. Dragging now only
+// ever resizes; the X is the only way out.
+type SheetSnap = "peek" | "half" | "full";
+
+const SNAP_HEIGHTS: Record<SheetSnap, string> = {
+  // Header only: title, count, X and the handle. Enough to make it obvious the list is
+  // still open and can be pulled back up.
+  peek: "96px",
+  half: "60dvh",
+  full: "92dvh",
+};
+
+const SNAP_ORDER: SheetSnap[] = ["peek", "half", "full"];
+
 // Past this much drag the gesture is treated as intent rather than a twitch.
 const DRAG_COMMIT_PX = 60;
 
@@ -53,7 +68,7 @@ export default function PostListSheet({
   initialScrollTop,
   onScrollChange,
 }: PostListSheetProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [snap, setSnap] = useState<SheetSnap>("half");
   const [dragOffset, setDragOffset] = useState(0);
   const dragStartRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -92,17 +107,15 @@ export default function PostListSheet({
     const offset = dragOffset;
     dragStartRef.current = null;
     setDragOffset(0);
-    if (offset > DRAG_COMMIT_PX) {
-      // Dragging down collapses an expanded sheet first, and only closes it once it is
-      // already at its smaller height — so a single flick can't skip a step.
-      if (expanded) setExpanded(false);
-      else onClose();
-    } else if (offset < -DRAG_COMMIT_PX) {
-      setExpanded(true);
-    }
+    if (Math.abs(offset) < DRAG_COMMIT_PX) return;
+    // One step per gesture, and it stops at the ends: a flick can't skip a height, and
+    // dragging down at the smallest one does nothing rather than dismissing the list.
+    const step = offset > 0 ? -1 : 1;
+    setSnap((current) => {
+      const next = SNAP_ORDER.indexOf(current) + step;
+      return SNAP_ORDER[Math.min(SNAP_ORDER.length - 1, Math.max(0, next))];
+    });
   };
-
-  const height = expanded ? EXPANDED_HEIGHT_VH : COLLAPSED_HEIGHT_VH;
 
   return (
     <div
@@ -110,38 +123,53 @@ export default function PostListSheet({
       aria-modal="false"
       aria-label={title}
       style={{
-        height: `${height}dvh`,
-        transform: dragOffset > 0 ? `translateY(${dragOffset}px)` : undefined,
+        height: SNAP_HEIGHTS[snap],
+        // Follows the finger only while dragging down, and only from a height it can
+        // actually leave — at "peek" there is nowhere lower to go, so the sheet stays put
+        // instead of implying it might close.
+        transform: dragOffset > 0 && snap !== "peek" ? `translateY(${dragOffset}px)` : undefined,
       }}
       className="fixed inset-x-0 bottom-0 z-[1200] flex flex-col rounded-t-3xl border-t border-slate-200 bg-white shadow-[0_-8px_30px_rgba(15,23,42,0.18)] transition-[height] duration-200"
     >
-      {/* Drag handle. Touch events only — the X covers pointer users, and mouse-dragging a
-          sheet is not an interaction anyone expects on desktop. */}
+      {/* Handle and header are one drag target. At the smallest height the handle alone is
+          a 1px line in a 96px sheet — everything visible should respond to the gesture.
+          Touch only: the X covers pointer users, and mouse-dragging a sheet is not an
+          interaction anyone expects on desktop. A tap that never moves falls under the
+          commit threshold, so the X and the rows still behave as buttons. */}
       <div
         onTouchStart={(e) => onDragStart(e.touches[0].clientY)}
         onTouchMove={(e) => onDragMove(e.touches[0].clientY)}
         onTouchEnd={onDragEnd}
-        className="shrink-0 cursor-grab px-4 pb-1 pt-2.5 active:cursor-grabbing"
+        className="shrink-0 cursor-grab touch-none active:cursor-grabbing"
       >
-        <div className="mx-auto h-1 w-10 rounded-full bg-slate-300" />
-      </div>
-
-      <div className="flex shrink-0 items-start gap-3 px-4 pb-2 pt-1">
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-bold text-slate-900">{title}</h2>
-          <p className="truncate text-xs text-slate-500">{subtitle}</p>
+        <div className="px-4 pb-1 pt-2.5">
+          <div className="mx-auto h-1 w-10 rounded-full bg-slate-300" />
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close list"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition active:bg-slate-200"
-        >
-          <IconX className="h-4 w-4" />
-        </button>
+
+        <div className="flex items-start gap-3 px-4 pb-2 pt-1">
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-base font-bold text-slate-900">{title}</h2>
+            <p className="truncate text-xs text-slate-500">{subtitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close list"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition active:bg-slate-200"
+          >
+            <IconX className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
-      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
+      {/* Kept mounted at every height, including "peek" where it is clipped to nothing:
+          unmounting it would throw away both the loaded pages and the scroll position the
+          user came back for. */}
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
+      >
         {posts.map((post) => (
           <button
             key={post.id}
