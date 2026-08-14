@@ -250,6 +250,24 @@ function merge(target: WorkingCluster, source: WorkingCluster) {
 }
 
 /**
+ * On-screen distance between two coordinates at a given zoom, in CSS pixels.
+ *
+ * Exported because "are these two markers close enough to be worth joining with a line?"
+ * is the same kind of question as "are they close enough to merge?" — both are about how
+ * far apart things *look*, which is only answerable in pixels.
+ */
+export function pixelDistanceBetween(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+  zoom: number,
+): number {
+  const worldSize = WORLD_TILE_SIZE * Math.pow(2, zoom);
+  const dx = projectX(a.lng, worldSize) - projectX(b.lng, worldSize);
+  const dy = projectY(a.lat, worldSize) - projectY(b.lat, worldSize);
+  return Math.hypot(dx, dy);
+}
+
+/**
  * Whether zooming in could ever break this cluster apart.
  *
  * A cluster of posts sharing one exact coordinate never separates, no matter the zoom, so

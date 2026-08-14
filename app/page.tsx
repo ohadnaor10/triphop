@@ -32,7 +32,7 @@ import {
 import { hasActiveDateSearch, type DateSearchInput } from "./lib/relevance";
 import { useAuth } from "./context/AuthContext";
 import { useUnreadMessageCount } from "./lib/messagesStore";
-import { clusterLocations, type MapCluster, type MapLocation } from "./lib/cluster";
+import { clusterLocations, pixelDistanceBetween, type MapCluster, type MapLocation } from "./lib/cluster";
 import PostListSheet from "./components/PostListSheet";
 import {
   useFocusedPostPlaces,
@@ -93,6 +93,9 @@ const GHOST_MIN_ZOOM = 5;
 // Same threshold for the dashed lines tying one trip's markers together: both are detail
 // that only earns its space once the map is showing roughly a single country.
 const TRIP_LINK_MIN_ZOOM = GHOST_MIN_ZOOM;
+// Longest link worth drawing, in screen pixels. Beyond this the line stops reading as
+// "these two markers are the same person" and becomes a stripe across the map.
+const TRIP_LINK_MAX_PX = 200;
 
 const TRIP_STYLES: TripVibe[] = ["Backpacking", "Road Trip", "Luxury", "Chill", "Adventure", "Culture"];
 const GENDERS: Gender[] = ["Male", "Female"];
@@ -1318,20 +1321,39 @@ function HomePageContent() {
     // focused trip's own labelled pins, so there is nothing left to disambiguate.
     if (zoom < TRIP_LINK_MIN_ZOOM || focusedMapPostId) return empty;
 
-    const markersByPost = new Map<string, { lat: number; lng: number }[]>();
+    const markersByPost = new Map<string, { lat: number; lng: number; postId: string | null }[]>();
     for (const cluster of mapClusters) {
       for (const postId of cluster.postIds) {
+        const marker = { lat: cluster.lat, lng: cluster.lng, postId: cluster.postId };
         const seen = markersByPost.get(postId);
-        if (seen) seen.push({ lat: cluster.lat, lng: cluster.lng });
-        else markersByPost.set(postId, [{ lat: cluster.lat, lng: cluster.lng }]);
+        if (seen) seen.push(marker);
+        else markersByPost.set(postId, [marker]);
       }
     }
 
     const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
-    for (const [postId, points] of markersByPost) {
+    for (const [postId, markers] of markersByPost) {
       // One marker means the trip is already drawn as a single thing — and two of its
       // cities merged into one cluster count as one marker, correctly.
-      if (points.length < 2) continue;
+      if (markers.length < 2) continue;
+
+      // A line exists to say "this face and that one are the same trip". Two count bubbles
+      // joined by a line have no face to disambiguate: it says only that some of the 90
+      // trips over here are also among the 47 over there, which nobody can act on. Drawing
+      // them anyway was most of the problem — in one Thailand viewport, 64 of 69 linked
+      // trips joined two anonymous bubbles, and the five that meant something were buried
+      // under them.
+      if (!markers.some((m) => m.postId !== null)) continue;
+
+      // Drop stops with no companion close enough on screen. Past a couple of hundred
+      // pixels a link stops reading as a connection between two markers and becomes a
+      // stripe over everything between them — and the same pair, drawn once per trip,
+      // stacked into a smear (one pair carried 41 overlapping copies).
+      const points = markers.filter((marker) =>
+        markers.some((other) => other !== marker && pixelDistanceBetween(marker, other, zoom) <= TRIP_LINK_MAX_PX),
+      );
+      if (points.length < 2 || !points.some((m) => m.postId !== null)) continue;
+
       const centreLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
       const centreLat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
       for (const point of points) {
