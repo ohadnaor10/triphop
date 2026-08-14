@@ -8,9 +8,7 @@ import turfBbox from "@turf/bbox";
 import turfDifference from "@turf/difference";
 import turfUnion from "@turf/union";
 import { featureCollection } from "@turf/helpers";
-import Combobox from "./components/Combobox";
 import CreatePostModal from "./components/CreatePostModal";
-import DateSearchFields from "./components/DateSearchFields";
 import { FeedList } from "./components/FeedList";
 import { FeedMapView } from "./components/FeedMapView";
 import HeroSearch from "./components/HeroSearch";
@@ -1107,28 +1105,47 @@ function HomePageContent() {
     return { countries, regions, cities, places };
   }, [destinationQuery, allPostCities, placeSuggestions]);
 
-  // Post-creation destination picker: same country/region search as the feed's
-  // destination panel (see renderDestinationPanel), restricted to country/region rows
-  // since cities are handled per-country below (see the "add specific places" reveal).
-  const postDestinationCards = useMemo((): SearchDestination[] => {
+  // Post-creation destination picker. Grouped exactly like the search bar's panel, and
+  // cities are offered directly rather than only through a country's expander — typing
+  // "Bangkok" should find Bangkok whether you are searching for trips or describing one.
+  //
+  // Natural features are deliberately absent, unlike in the search: a post's destinations
+  // are countries, their cities, and regions, so there is nowhere to put "the Alps". Only
+  // offering what can actually be stored beats accepting it and quietly filing it under
+  // France.
+  const postDestinationResults = useMemo(() => {
     const q = postDestQuery.trim().toLowerCase();
     if (q === "") {
-      return getPopularDestinations().map((c) => ({ type: "country" as const, code: c.isoCode, name: c.name }));
+      return {
+        countries: getPopularDestinations().map((c) => ({ type: "country" as const, code: c.isoCode, name: c.name })),
+        regions: [] as SearchDestination[],
+        cities: [] as SearchDestination[],
+      };
     }
+    // Prefix match, same as the search panel: a type-ahead list should read as "starts
+    // with what I typed" rather than "contains it somewhere".
     const countries: SearchDestination[] = getAllCountries()
-      .filter((c) => c.name.toLowerCase().includes(q))
-      .slice(0, 12)
+      .filter((c) => c.name.toLowerCase().startsWith(q))
+      .slice(0, 8)
       .map((c) => ({ type: "country" as const, code: c.isoCode, name: c.name }));
-    const regions: SearchDestination[] = REGIONS.filter((r) => r.toLowerCase().includes(q)).map((r) => ({
+    const regions: SearchDestination[] = REGIONS.filter((r) => r.toLowerCase().startsWith(q)).map((r) => ({
       type: "region" as const,
       name: r,
     }));
-    return [...countries, ...regions];
-  }, [postDestQuery]);
+    const cities = allPostCities.filter((c) => c.name.toLowerCase().startsWith(q)).slice(0, 8);
+    return { countries, regions, cities };
+  }, [postDestQuery, allPostCities]);
 
   function isDestinationChosen(item: SearchDestination): boolean {
     if (item.type === "country") return form.destinations.some((e) => e.kind === "country" && e.countryCode === item.code);
     if (item.type === "region") return form.destinations.some((e) => e.kind === "region" && e.region === item.name);
+    // A city counts as chosen only when it is actually in its country's city list —
+    // having picked the country alone doesn't select every city in it.
+    if (item.type === "city") {
+      return form.destinations.some(
+        (e) => e.kind === "country" && e.countryCode === item.countryCode && e.cities.includes(item.name),
+      );
+    }
     return false;
   }
 
@@ -1151,6 +1168,39 @@ function HomePageContent() {
           destinations: exists
             ? prev.destinations.filter((e) => !(e.kind === "region" && e.region === item.name))
             : [...prev.destinations, { kind: "region", region: item.name }],
+        };
+      });
+    } else if (item.type === "city") {
+      // A city is stored inside its country's entry, so picking one either adds it to an
+      // existing entry or creates that country's entry around it. Removing the last city
+      // leaves the country behind rather than deleting it — dropping a stop shouldn't
+      // silently drop the country the user is going to.
+      setForm((prev) => {
+        const entry = prev.destinations.find(
+          (e): e is Extract<DestinationEntry, { kind: "country" }> =>
+            e.kind === "country" && e.countryCode === item.countryCode,
+        );
+        if (!entry) {
+          return {
+            ...prev,
+            destinations: [
+              ...prev.destinations,
+              { kind: "country", country: item.countryName, countryCode: item.countryCode, cities: [item.name] },
+            ],
+          };
+        }
+        return {
+          ...prev,
+          destinations: prev.destinations.map((e) =>
+            e.kind === "country" && e.countryCode === item.countryCode
+              ? {
+                  ...e,
+                  cities: e.cities.includes(item.name)
+                    ? e.cities.filter((c) => c !== item.name)
+                    : [...e.cities, item.name],
+                }
+              : e,
+          ),
         };
       });
     }
@@ -1680,7 +1730,7 @@ function HomePageContent() {
         setForm={setForm}
         postDestQuery={postDestQuery}
         setPostDestQuery={setPostDestQuery}
-        postDestinationCards={postDestinationCards}
+        postDestinationResults={postDestinationResults}
         isDestinationChosen={isDestinationChosen}
         toggleDestinationChoice={toggleDestinationChoice}
         removeDestinationEntry={removeDestinationEntry}

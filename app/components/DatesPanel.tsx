@@ -1,6 +1,5 @@
-import CalendarRangePicker from "./CalendarRangePicker";
+import DateModeFields from "./DateModeFields";
 import HeroPanelShell from "./HeroPanelShell";
-import MonthCarousel from "./MonthCarousel";
 import type { DateSearchUI } from "../page";
 
 export type DatesPanelProps = {
@@ -30,56 +29,22 @@ export default function DatesPanel({
   if (!isOpen) return null;
   return (
     <HeroPanelShell>
-      <div className="flex shrink-0 gap-1 border-b border-slate-100 p-1.5">
-        <button
-          type="button"
-          onClick={() => setDateSearchDraft((d) => ({ ...d, mode: "specific" }))}
-          className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
-            dateSearchDraft.mode === "specific" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
-          }`}
-        >
-          Specific Dates
-        </button>
-        <button
-          type="button"
-          onClick={() => setDateSearchDraft((d) => ({ ...d, mode: "flexible" }))}
-          className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
-            dateSearchDraft.mode === "flexible" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
-          }`}
-        >
-          Flexible Dates
-        </button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {dateSearchDraft.mode === "specific" ? (
-          <CalendarRangePicker
-            months={1}
-            startDate={dateSearchDraft.startDate}
-            endDate={dateSearchDraft.endDate}
-            onChange={(range) => {
-              const next = { ...dateSearchDraft, ...range };
-              setDateSearchDraft(next);
-              if (range.startDate && range.endDate) {
-                setAppliedDateSearch(next);
-                setOpenHeroField(null);
-              }
-            }}
-          />
-        ) : (
-          <MonthCarousel
-            months={monthOptions}
-            selected={dateSearchDraft.months}
-            formatMonth={formatMonth}
-            currentMonth={currentMonthKey()}
-            onToggle={(month) =>
-              setDateSearchDraft((d) => ({
-                ...d,
-                months: d.months.includes(month) ? d.months.filter((m) => m !== month) : [...d.months, month],
-              }))
-            }
-          />
-        )}
+      {/* Tabs + calendar shared with the post wizard, so searching for dates and setting
+          them on a post look and behave identically. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <DateModeFields
+          draft={dateSearchDraft}
+          onDraftChange={(updater) => setDateSearchDraft((d) => updater(d))}
+          monthOptions={monthOptions}
+          currentMonth={currentMonthKey()}
+          formatMonth={formatMonth}
+          onRangeComplete={(range) => {
+            // The search applies a complete range immediately — picking both ends is the
+            // whole interaction, so making the user confirm it again is a wasted tap.
+            setAppliedDateSearch({ ...dateSearchDraft, ...range });
+            setOpenHeroField(null);
+          }}
+        />
       </div>
 
       <div className="flex shrink-0 items-center gap-2 border-t border-slate-100 p-2.5">
