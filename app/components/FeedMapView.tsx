@@ -1,4 +1,5 @@
 import dynamic from "next/dynamic";
+import { useState } from "react";
 import { IconX } from "./icons";
 import type { MapCluster } from "../lib/cluster";
 import type { FocusedPlace, MapViewport } from "../lib/mapStore";
@@ -65,6 +66,10 @@ export function FeedMapView({
   getDateLabel,
   getDestinationLabel,
 }: FeedMapViewProps) {
+  // DEBUG ONLY — live zoom readout under the map, for tuning the zoom thresholds that
+  // gate ghost markers and trip links. Delete this state, the onZoomChange prop and the
+  // readout below to remove it.
+  const [debugZoom, setDebugZoom] = useState<number | null>(null);
   return (
     <div className="flex flex-col gap-3">
       <div className="px-1">
@@ -89,6 +94,7 @@ export function FeedMapView({
           spotlightMask={spotlightMask}
           tripLinks={tripLinks}
           onViewportChange={onViewportChange}
+          onZoomChange={setDebugZoom}
           initialBounds={initialBounds}
         />
 
@@ -166,6 +172,10 @@ export function FeedMapView({
           : focusedMapPostId
             ? "Showing this trip's destinations only — close the card to see everyone again."
             : "Tap someone's photo to preview their trip and message on WhatsApp."}
+      </p>
+      {/* DEBUG ONLY — see debugZoom above. */}
+      <p className="px-1 text-center font-mono text-[11px] text-slate-400">
+        zoom {debugZoom === null ? "—" : debugZoom.toFixed(2)}
       </p>
     </div>
   );

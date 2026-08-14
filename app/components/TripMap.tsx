@@ -196,6 +196,11 @@ export type TripMapProps = {
   onOpenClusterList: (cluster: MapCluster) => void;
   /** Fired on moveend (and once the style loads) so the caller can refetch for the new area. */
   onViewportChange: (viewport: MapViewport) => void;
+  /**
+   * DEBUG ONLY — fires continuously during a gesture, unlike onViewportChange which waits
+   * for it to settle. Feeds the live zoom readout under the map; delete along with it.
+   */
+  onZoomChange?: (zoom: number) => void;
   /** Initial camera, applied once — used to open on the destination the user searched for. */
   initialBounds?: [number, number, number, number] | null;
 };
@@ -212,6 +217,7 @@ export default function TripMap({
   focusedUnpinnedCountryCodes,
   onSelectPost,
   onViewportChange,
+  onZoomChange,
   initialBounds,
 }: TripMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -224,6 +230,7 @@ export default function TripMap({
   const onSelectPostRef = useRef(onSelectPost);
   const onOpenClusterListRef = useRef(onOpenClusterList);
   const onViewportChangeRef = useRef(onViewportChange);
+  const onZoomChangeRef = useRef(onZoomChange);
   // Lets the visibility effect below re-announce the viewport without duplicating the
   // bounds-reading logic that lives inside the map-init effect.
   const emitViewportRef = useRef<(() => void) | null>(null);
@@ -231,7 +238,8 @@ export default function TripMap({
     onSelectPostRef.current = onSelectPost;
     onOpenClusterListRef.current = onOpenClusterList;
     onViewportChangeRef.current = onViewportChange;
-  }, [onSelectPost, onOpenClusterList, onViewportChange]);
+    onZoomChangeRef.current = onZoomChange;
+  }, [onSelectPost, onOpenClusterList, onViewportChange, onZoomChange]);
 
   // Style-loaded is tracked as state (not a one-off `map.once("load", ...)` per effect)
   // so every downstream effect re-runs exactly once the map is actually ready, always
@@ -272,6 +280,9 @@ export default function TripMap({
       emitViewport();
     });
     map.on("moveend", emitViewport);
+    // DEBUG ONLY: "move" fires throughout a gesture, where "moveend" only fires once it
+    // stops — the readout is meant to track the zoom as it changes.
+    map.on("move", () => onZoomChangeRef.current?.(map.getZoom()));
     mapRef.current = map;
 
     return () => {
