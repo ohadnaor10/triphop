@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Post } from "../page";
 import type { MapLocation } from "./cluster";
 import { getCountryByCode } from "./geo";
-import { colorFor, type PostsFilters } from "./postsStore";
+import { colorFor, toDestinationParam, type PostsFilters } from "./postsStore";
 import { hasActiveDateSearch } from "./relevance";
 import { useClerkSupabaseClient } from "./supabase/useClerkSupabaseClient";
 
@@ -167,8 +167,11 @@ export function useMapPoints(filters: PostsFilters, viewport: MapViewport | null
   const coverageRef = useRef<MapViewport | null>(null);
 
   const activeDateSearch = filters.dateSearch && hasActiveDateSearch(filters.dateSearch) ? filters.dateSearch : null;
-  // Destination is absent by design — on the map, the viewport is the destination filter.
+  // Destination composes with the viewport rather than being replaced by it: panning finds
+  // an area, the filter narrows what is drawn inside it. Same shape the feed sends, so a
+  // destination means the same thing on both surfaces.
   const filterParams = {
+    p_destinations: filters.destinations.map(toDestinationParam),
     p_vibe: filters.vibe === "All" ? null : filters.vibe,
     p_gender: filters.gender === "All" ? null : filters.gender,
     p_age_min: filters.ageMin.trim() === "" ? null : Number(filters.ageMin),

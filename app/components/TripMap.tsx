@@ -12,6 +12,9 @@ const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 const BOUNDARY_SOURCE_ID = "trip-map-focused-boundaries";
 const BOUNDARY_FILL_LAYER = `${BOUNDARY_SOURCE_ID}-fill`;
 const BOUNDARY_LINE_LAYER = `${BOUNDARY_SOURCE_ID}-line`;
+const SPOTLIGHT_SOURCE_ID = "trip-map-destination-spotlight";
+const SPOTLIGHT_FILL_LAYER = `${SPOTLIGHT_SOURCE_ID}-fill`;
+const SPOTLIGHT_LINE_LAYER = `${SPOTLIGHT_SOURCE_ID}-line`;
 
 // How far out the map can be zoomed. Below this the whole globe (and then copies of it)
 // fits on screen, where every marker collapses into a handful of meaningless blobs and
@@ -168,6 +171,12 @@ export type TripMapProps = {
    * to make focus visible at all.
    */
   focusedCountryCodes: string[];
+  /**
+   * Everything *outside* the searched destinations, as one polygon with a hole per
+   * selection, dimmed so the area in question reads at a glance. Null when nothing is
+   * selected, or when a selection has no area to cut a hole from (see page.tsx).
+   */
+  spotlightMask: GeoJSON.Feature<GeoJSON.Polygon> | null;
   onSelectPost: (postId: string) => void;
   /**
    * A cluster that zooming can never separate — every member on one coordinate, or a
@@ -184,6 +193,7 @@ export type TripMapProps = {
 export default function TripMap({
   isVisible,
   clusters,
+  spotlightMask,
   onOpenClusterList,
   focusedPostId,
   focusedPlaces,
@@ -405,6 +415,44 @@ export default function TripMap({
     );
     map.fitBounds(bounds, { padding: 70, maxZoom: SINGLE_PLACE_FOCUS_ZOOM, duration: 700, essential: true });
   }, [focusedPlaces, focusedCountryCodes, isStyleLoaded]);
+
+  // Everything outside the searched destinations, dimmed. Drawn as a single polygon
+  // covering the world with a hole cut for each selection, which is why one fill can dim
+  // "everywhere except Thailand and Vietnam" without any per-country layers.
+  //
+  // The markers are DOM elements Mapbox positions above the canvas, so they are never
+  // dimmed by this — only the map underneath is, which is the intent: the trips stay
+  // fully legible, the geography they are not about recedes.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isStyleLoaded) return;
+
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    const data: GeoJSON.FeatureCollection = spotlightMask
+      ? { type: "FeatureCollection", features: [spotlightMask] }
+      : empty;
+
+    const source = map.getSource(SPOTLIGHT_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+    if (source) {
+      source.setData(data);
+      return;
+    }
+    map.addSource(SPOTLIGHT_SOURCE_ID, { type: "geojson", data });
+    map.addLayer({
+      id: SPOTLIGHT_FILL_LAYER,
+      type: "fill",
+      source: SPOTLIGHT_SOURCE_ID,
+      paint: { "fill-color": "#0f172a", "fill-opacity": 0.45 },
+    });
+    // A hairline on the boundary of the lit area, so the edge reads as deliberate rather
+    // than as the scrim having failed to cover something.
+    map.addLayer({
+      id: SPOTLIGHT_LINE_LAYER,
+      type: "line",
+      source: SPOTLIGHT_SOURCE_ID,
+      paint: { "line-color": "#f97316", "line-width": 1.5, "line-opacity": 0.9 },
+    });
+  }, [spotlightMask, isStyleLoaded]);
 
   // Country shading. Off for posts that have pins (SHOW_FOCUSED_COUNTRY_SHADING) — a
   // country-sized fill just tints the whole viewport at the zoom focusing lands on. But a

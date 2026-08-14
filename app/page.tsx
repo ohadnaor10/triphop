@@ -14,6 +14,7 @@ import HeroSearch from "./components/HeroSearch";
 import { PostDetailView, UserProfileOverlay } from "./components/PostDetailView";
 import TopNavBar from "./components/TopNavBar";
 import { getPopularDestinations } from "./data/popularDestinations";
+import type { BoundaryGeometry } from "./lib/geo";
 import {
   geocodePlace,
   geocodeSuggestions,
@@ -304,6 +305,54 @@ async function getDestinationPoints(destinations: Destination[]): Promise<GeoPoi
     }),
   );
   return perDestination.flat();
+}
+
+// Everything outside the searched destinations, as one polygon: an outer ring around the
+// whole world, with a hole cut for each selection. GeoJSON treats every ring after the
+// first as a hole, so one feature dims "everywhere except these places" without a layer
+// per country.
+//
+// Only area-shaped selections cut holes. A city or a natural feature is a point with, at
+// best, a geocoding bounding box, and no shape we could draw for it would be honest about
+// how approximate it is — that question is still open, so those selections narrow the data
+// and move the camera but draw no scrim at all. Mixing the two would be worse than either:
+// a city's markers would sit inside the dimmed zone, reading as excluded when they are the
+// only things included.
+const WORLD_RING: [number, number][] = [
+  [-180, -85],
+  [180, -85],
+  [180, 85],
+  [-180, 85],
+  [-180, -85],
+];
+
+function outerRingsOf(feature: GeoJSON.Feature<BoundaryGeometry>): [number, number][][] {
+  if (feature.geometry.type === "Polygon") return [feature.geometry.coordinates[0] as [number, number][]];
+  return feature.geometry.coordinates.map((polygon) => polygon[0] as [number, number][]);
+}
+
+function spotlightMaskFor(destinations: SearchDestination[]): GeoJSON.Feature<GeoJSON.Polygon> | null {
+  if (destinations.length === 0) return null;
+  // One point-shaped selection is enough to switch the scrim off entirely.
+  if (destinations.some((d) => d.type === "city" || d.type === "place")) return null;
+
+  const holes: [number, number][][] = [];
+  for (const destination of destinations) {
+    const boundary =
+      destination.type === "country"
+        ? getCountryBoundary(destination.code)
+        : destination.type === "region"
+          ? getRegionBoundary(destination.name)
+          : undefined;
+    if (boundary) holes.push(...outerRingsOf(boundary));
+  }
+  if (holes.length === 0) return null;
+
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: { type: "Polygon", coordinates: [WORLD_RING, ...holes] },
+  };
 }
 
 // Bounding box the map should open on for a set of searched destinations — the bridge
@@ -1122,6 +1171,8 @@ function HomePageContent() {
     totalCount: mapTotalCount,
   } = useMapPoints(filters, mapViewport);
 
+  const spotlightMask = useMemo(() => spotlightMaskFor(selectedDestinations), [selectedDestinations]);
+
   // Coordinates and viewport filtering are applied in the store, so ghosts and city
   // locations always describe the same snapshot; this is only the shape conversion.
   const ghostLocations = useMemo<MapLocation[]>(
@@ -1445,9 +1496,6 @@ function HomePageContent() {
 
           <HeroSearch
             variant="compact"
-            // On the map, pan/zoom is the destination filter — see search_posts_map's
-            // deliberate lack of a p_destinations parameter.
-            destinationDisabled={view === "map"}
             heroRef={heroRef}
             openHeroField={openHeroField}
             setOpenHeroField={setOpenHeroField}
@@ -1557,6 +1605,7 @@ function HomePageContent() {
                   focusedCountryCodes={focusedMapCountryCodes}
                   setFocusedMapPostId={(id) => (id === null ? clearMapFocus() : setFocusedMapPostId(id))}
                   onOpenClusterList={openClusterList}
+                  spotlightMask={spotlightMask}
                   focusedMapPost={focusedMapPost}
                   setViewPostId={setViewPostId}
                   goToUserProfile={goToUserProfile}

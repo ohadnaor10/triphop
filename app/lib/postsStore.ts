@@ -224,7 +224,7 @@ function useMockPostsStore(filters: PostsFilters): PostsStore {
 
 // ---------- Real store (Supabase-backed) ----------
 
-function toDestinationParam(d: SearchDestination): Record<string, unknown> {
+export function toDestinationParam(d: SearchDestination): Record<string, unknown> {
   if (d.type === "country") return { kind: "country", code: d.code };
   if (d.type === "city") return { kind: "city", name: d.name, countryCode: d.countryCode };
   if (d.type === "region") return { kind: "region", region: d.name };

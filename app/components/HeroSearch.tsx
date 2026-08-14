@@ -40,8 +40,6 @@ type SharedProps = {
 
 type CompactVariantProps = SharedProps & {
   variant: "compact";
-  /** Map view filters by viewport, so the destination trigger is inert there. */
-  destinationDisabled: boolean;
   hasMoreFiltersActive: boolean;
   clearMoreFilters: () => void;
   vibeFilter: TripVibe | "All";
@@ -73,55 +71,36 @@ export type HeroSearchProps = CompactVariantProps | FullVariantProps;
 // compact sticky-header search bar (shown once the user has searched) and the large,
 // centered first-run prompt (shown before that) — same behavior, different sizing, so
 // the two surfaces can't drift apart.
-function renderDestinationTrigger(size: "sm" | "lg", props: SharedProps, disabled = false) {
+function renderDestinationTrigger(size: "sm" | "lg", props: SharedProps) {
   const { openHeroField, setOpenHeroField, selectedDestinations } = props;
   const hasSelection = selectedDestinations.length > 0;
   const content = (
     <div
       className={`flex min-w-0 flex-1 items-center transition ${
         size === "lg" ? "border-b border-slate-100 sm:border-b-0 sm:border-r" : "border-r border-slate-100"
-      } ${
-        disabled
-          ? "bg-slate-50"
-          : openHeroField === "destination"
-            ? "bg-orange-50"
-            : "bg-white hover:bg-slate-50"
-      }`}
+      } ${openHeroField === "destination" ? "bg-orange-50" : "bg-white hover:bg-slate-50"}`}
     >
       <button
         type="button"
-        disabled={disabled}
-        aria-disabled={disabled}
-        title={disabled ? "On the map, pan and zoom to choose where you're looking" : undefined}
         onClick={() => setOpenHeroField(openHeroField === "destination" ? null : "destination")}
         className={`flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left ${
           size === "lg" ? "px-4 py-4" : "px-3 py-2.5"
-        } ${disabled ? "cursor-default" : ""}`}
+        }`}
       >
         <span
-          className={`flex items-center gap-1 font-semibold uppercase tracking-wide ${
-            disabled ? "text-slate-300" : "text-slate-400"
-          } ${size === "lg" ? "text-xs" : "text-[10px]"}`}
+          className={`flex items-center gap-1 font-semibold uppercase tracking-wide text-slate-400 ${
+            size === "lg" ? "text-xs" : "text-[10px]"
+          }`}
         >
           <IconMapPin className={size === "lg" ? "h-3.5 w-3.5" : "h-3 w-3"} />
           Destination
         </span>
-        <span
-          className={`w-full truncate font-semibold ${disabled ? "text-slate-400" : "text-slate-900"} ${
-            size === "lg" ? "text-base" : "text-sm"
-          }`}
-        >
-          {/* The selection is kept, not cleared — it re-applies the moment the user
-              switches back to the feed — but it has no effect while the map is showing. */}
-          {disabled
-            ? "Pan the map"
-            : hasSelection
-              ? selectedDestinations.map((d) => d.name).join(" + ")
-              : "Anywhere"}
+        <span className={`w-full truncate font-semibold text-slate-900 ${size === "lg" ? "text-base" : "text-sm"}`}>
+          {hasSelection ? selectedDestinations.map((d) => d.name).join(" + ") : "Anywhere"}
         </span>
       </button>
 
-      {hasSelection && !disabled && (
+      {hasSelection && (
         <button
           type="button"
           onClick={() => setOpenHeroField("destination")}
@@ -228,14 +207,13 @@ function CompactHeroSearch(props: CompactVariantProps) {
     setAgeMaxFilter,
     tripStyles,
     genders,
-    destinationDisabled,
   } = props;
   return (
     // Hero Search
     <div ref={heroRef} className="relative mx-auto max-w-lg px-4 pb-3">
       <div className="flex items-stretch gap-2">
         <div className="flex flex-1 items-stretch overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
-          {renderDestinationTrigger("sm", props, destinationDisabled)}
+          {renderDestinationTrigger("sm", props)}
           {renderDatesTrigger("sm", props)}
         </div>
         <button

@@ -24,6 +24,8 @@ export type FeedMapViewProps = {
   initialBounds: [number, number, number, number] | null;
   /** A cluster zooming can never split — the caller opens a list of its posts instead. */
   onOpenClusterList: (cluster: MapCluster) => void;
+  /** Dimming for everything outside the searched destinations; null when nothing applies. */
+  spotlightMask: GeoJSON.Feature<GeoJSON.Polygon> | null;
   focusedMapPostId: string | null;
   /** Destinations of the focused post; while non-empty the map shows only these. */
   focusedPlaces: FocusedPlace[];
@@ -45,6 +47,7 @@ export function FeedMapView({
   onViewportChange,
   initialBounds,
   onOpenClusterList,
+  spotlightMask,
   focusedMapPostId,
   focusedPlaces,
   focusedCountryCodes,
@@ -76,6 +79,7 @@ export function FeedMapView({
           focusedCountryCodes={focusedCountryCodes}
           onSelectPost={(id) => setFocusedMapPostId(id)}
           onOpenClusterList={onOpenClusterList}
+          spotlightMask={spotlightMask}
           onViewportChange={onViewportChange}
           initialBounds={initialBounds}
         />
