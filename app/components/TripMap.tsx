@@ -15,6 +15,8 @@ const BOUNDARY_LINE_LAYER = `${BOUNDARY_SOURCE_ID}-line`;
 const SPOTLIGHT_SOURCE_ID = "trip-map-destination-spotlight";
 const SPOTLIGHT_FILL_LAYER = `${SPOTLIGHT_SOURCE_ID}-fill`;
 const SPOTLIGHT_LINE_LAYER = `${SPOTLIGHT_SOURCE_ID}-line`;
+const TRIP_LINK_SOURCE_ID = "trip-map-trip-links";
+const TRIP_LINK_LAYER = `${TRIP_LINK_SOURCE_ID}-line`;
 
 // How far out the map can be zoomed. Below this the whole globe (and then copies of it)
 // fits on screen, where every marker collapses into a handful of meaningless blobs and
@@ -179,6 +181,12 @@ export type TripMapProps = {
    * selected, or when a selection has no area to cut a hole from (see page.tsx).
    */
   spotlightMask: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null;
+  /**
+   * Dashed spokes from each multi-stop trip's midpoint to its markers, so the same face
+   * appearing in two places reads as one journey. Empty when the zoom is too far out to
+   * make them worth drawing, or while a post is focused.
+   */
+  tripLinks: GeoJSON.FeatureCollection<GeoJSON.LineString>;
   onSelectPost: (postId: string) => void;
   /**
    * A cluster that zooming can never separate — every member on one coordinate, or a
@@ -196,6 +204,7 @@ export default function TripMap({
   isVisible,
   clusters,
   spotlightMask,
+  tripLinks,
   onOpenClusterList,
   focusedPostId,
   focusedPlaces,
@@ -483,6 +492,35 @@ export default function TripMap({
       paint: { "line-color": "#2563EB", "line-width": 2 },
     });
   }, [focusedCountryCodes, focusedPlaces, isStyleLoaded]);
+
+  // Dashed spokes joining one trip's markers. Added after the two fill layers so the lines
+  // sit above them, and still below the markers — those are DOM elements Mapbox positions
+  // over the canvas, so nothing here can cover a face.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isStyleLoaded) return;
+
+    const source = map.getSource(TRIP_LINK_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+    if (source) {
+      source.setData(tripLinks);
+      return;
+    }
+    map.addSource(TRIP_LINK_SOURCE_ID, { type: "geojson", data: tripLinks });
+    map.addLayer({
+      id: TRIP_LINK_LAYER,
+      type: "line",
+      source: TRIP_LINK_SOURCE_ID,
+      layout: { "line-cap": "round" },
+      // Grey and dashed on purpose: this is a hint about which markers belong together,
+      // not a route anyone is travelling, and a solid coloured line would read as one.
+      paint: {
+        "line-color": "#64748b",
+        "line-width": 1.5,
+        "line-opacity": 0.75,
+        "line-dasharray": [2, 2],
+      },
+    });
+  }, [tripLinks, isStyleLoaded]);
 
   useEffect(() => {
     const map = mapRef.current;

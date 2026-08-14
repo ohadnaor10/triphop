@@ -90,6 +90,9 @@ export type Post = {
 
 // Zoom at which country-level "no city chosen" markers start being drawn — see mapClusters.
 const GHOST_MIN_ZOOM = 5;
+// Same threshold for the dashed lines tying one trip's markers together: both are detail
+// that only earns its space once the map is showing roughly a single country.
+const TRIP_LINK_MIN_ZOOM = GHOST_MIN_ZOOM;
 
 const TRIP_STYLES: TripVibe[] = ["Backpacking", "Road Trip", "Luxury", "Chill", "Adventure", "Culture"];
 const GENDERS: Gender[] = ["Male", "Female"];
@@ -1241,6 +1244,7 @@ function HomePageContent() {
 
   const spotlightMask = useMemo(() => spotlightMaskFor(selectedDestinations), [selectedDestinations]);
 
+
   // Coordinates and viewport filtering are applied in the store, so ghosts and city
   // locations always describe the same snapshot; this is only the shape conversion.
   const ghostLocations = useMemo<MapLocation[]>(
@@ -1295,6 +1299,51 @@ function HomePageContent() {
     const visible = zoom >= GHOST_MIN_ZOOM ? [...mapLocations, ...ghostLocations] : mapLocations;
     return clusterLocations(visible, zoom);
   }, [mapLocations, ghostLocations, mapOverview, mapViewport?.zoom]);
+
+  // Dashed lines joining the markers of one trip, so two faces of the same person in two
+  // cities read as one journey instead of two coincidences.
+  //
+  // Drawn as a star from the trip's midpoint rather than a chain between its stops: the
+  // destinations on a post are a set, not an itinerary, and a chain would draw a route the
+  // poster never described. With exactly two markers the two spokes are collinear, so the
+  // common case still looks like a single straight line.
+  //
+  // Built from the clusters rather than from the raw locations, which is what makes it work
+  // when markers have merged: a cluster carries the ids of everything inside it, so a trip
+  // whose second city is buried in a busy cluster still links to where that cluster sits.
+  const tripLinks = useMemo<GeoJSON.FeatureCollection<GeoJSON.LineString>>(() => {
+    const empty: GeoJSON.FeatureCollection<GeoJSON.LineString> = { type: "FeatureCollection", features: [] };
+    const zoom = mapViewport?.zoom ?? 2;
+    // Hidden while a post is focused: that view already replaces every marker with the
+    // focused trip's own labelled pins, so there is nothing left to disambiguate.
+    if (zoom < TRIP_LINK_MIN_ZOOM || focusedMapPostId) return empty;
+
+    const markersByPost = new Map<string, { lat: number; lng: number }[]>();
+    for (const cluster of mapClusters) {
+      for (const postId of cluster.postIds) {
+        const seen = markersByPost.get(postId);
+        if (seen) seen.push({ lat: cluster.lat, lng: cluster.lng });
+        else markersByPost.set(postId, [{ lat: cluster.lat, lng: cluster.lng }]);
+      }
+    }
+
+    const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+    for (const [postId, points] of markersByPost) {
+      // One marker means the trip is already drawn as a single thing — and two of its
+      // cities merged into one cluster count as one marker, correctly.
+      if (points.length < 2) continue;
+      const centreLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
+      const centreLat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
+      for (const point of points) {
+        features.push({
+          type: "Feature",
+          properties: { postId },
+          geometry: { type: "LineString", coordinates: [[centreLng, centreLat], [point.lng, point.lat]] },
+        });
+      }
+    }
+    return { type: "FeatureCollection", features };
+  }, [mapClusters, mapViewport?.zoom, focusedMapPostId]);
 
   // The list sheet a non-splittable cluster (or a country ghost) opens, plus the state
   // needed to come back to it: opening a post from the list closes the sheet, and closing
@@ -1701,6 +1750,7 @@ function HomePageContent() {
                   setFocusedMapPostId={(id) => (id === null ? clearMapFocus() : setFocusedMapPostId(id))}
                   onOpenClusterList={openClusterList}
                   spotlightMask={spotlightMask}
+                  tripLinks={tripLinks}
                   focusedMapPost={focusedMapPost}
                   setViewPostId={setViewPostId}
                   goToUserProfile={goToUserProfile}

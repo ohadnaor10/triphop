@@ -26,6 +26,8 @@ export type FeedMapViewProps = {
   onOpenClusterList: (cluster: MapCluster) => void;
   /** Dimming for everything outside the searched destinations; null when nothing applies. */
   spotlightMask: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null;
+  /** Dashed spokes tying each trip's markers to its midpoint. */
+  tripLinks: GeoJSON.FeatureCollection<GeoJSON.LineString>;
   focusedMapPostId: string | null;
   /** Destinations of the focused post; while non-empty the map shows only these. */
   focusedPlaces: FocusedPlace[];
@@ -50,6 +52,7 @@ export function FeedMapView({
   initialBounds,
   onOpenClusterList,
   spotlightMask,
+  tripLinks,
   focusedMapPostId,
   focusedPlaces,
   focusedCountryCodes,
@@ -84,6 +87,7 @@ export function FeedMapView({
           onSelectPost={(id) => setFocusedMapPostId(id)}
           onOpenClusterList={onOpenClusterList}
           spotlightMask={spotlightMask}
+          tripLinks={tripLinks}
           onViewportChange={onViewportChange}
           initialBounds={initialBounds}
         />
