@@ -97,6 +97,14 @@ const TRIP_LINK_MIN_ZOOM = GHOST_MIN_ZOOM;
 // "these two markers are the same person" and becomes a stripe across the map.
 const TRIP_LINK_MAX_PX = 200;
 
+// Trip links are switched off. Even narrowed to face-bearing, short-range connections,
+// they added lines to a map whose markers already carry the same information — a face
+// appearing twice is legible without a line drawn between the two. The machinery below is
+// kept intact rather than deleted: the rules it encodes (only link an identifiable post,
+// only over a short screen distance, aggregate from clusters so merged markers still
+// connect) were expensive to arrive at, and flipping this back to true restores them.
+const SHOW_TRIP_LINKS = false;
+
 const TRIP_STYLES: TripVibe[] = ["Backpacking", "Road Trip", "Luxury", "Chill", "Adventure", "Culture"];
 const GENDERS: Gender[] = ["Male", "Female"];
 
@@ -1303,8 +1311,9 @@ function HomePageContent() {
     return clusterLocations(visible, zoom);
   }, [mapLocations, ghostLocations, mapOverview, mapViewport?.zoom]);
 
-  // Dashed lines joining the markers of one trip, so two faces of the same person in two
-  // cities read as one journey instead of two coincidences.
+  // Dormant — see SHOW_TRIP_LINKS. Dashed lines joining the markers of one trip, so two
+  // faces of the same person in two cities read as one journey rather than two
+  // coincidences.
   //
   // Drawn as a star from the trip's midpoint rather than a chain between its stops: the
   // destinations on a post are a set, not an itinerary, and a chain would draw a route the
@@ -1316,6 +1325,7 @@ function HomePageContent() {
   // whose second city is buried in a busy cluster still links to where that cluster sits.
   const tripLinks = useMemo<GeoJSON.FeatureCollection<GeoJSON.LineString>>(() => {
     const empty: GeoJSON.FeatureCollection<GeoJSON.LineString> = { type: "FeatureCollection", features: [] };
+    if (!SHOW_TRIP_LINKS) return empty;
     const zoom = mapViewport?.zoom ?? 2;
     // Hidden while a post is focused: that view already replaces every marker with the
     // focused trip's own labelled pins, so there is nothing left to disambiguate.

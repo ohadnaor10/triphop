@@ -26,11 +26,6 @@ const MIN_ZOOM = 2;
 // place the city in its surroundings, not so close that all context is lost.
 const SINGLE_PLACE_FOCUS_ZOOM = 9;
 
-// Focusing a post used to also shade its countries with a translucent polygon. Kept, but
-// off: at the zoom focusing lands on, a country-sized fill just tints the whole viewport
-// and competes with the pins it is supposed to support. Flip to true to bring it back —
-// toBoundaryFeatureCollection and the effect below are maintained for that.
-const SHOW_FOCUSED_COUNTRY_SHADING = false;
 // How far in the camera is allowed to go, and therefore the zoom at which "can this
 // cluster ever be broken apart?" is decided.
 const MAX_ZOOM = 18;
