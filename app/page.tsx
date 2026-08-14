@@ -5,6 +5,9 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type Submi
 import { flushSync } from "react-dom";
 import { IconPlus } from "./components/icons";
 import turfBbox from "@turf/bbox";
+import turfDifference from "@turf/difference";
+import turfUnion from "@turf/union";
+import { featureCollection } from "@turf/helpers";
 import Combobox from "./components/Combobox";
 import CreatePostModal from "./components/CreatePostModal";
 import DateSearchFields from "./components/DateSearchFields";
@@ -326,17 +329,20 @@ const WORLD_RING: [number, number][] = [
   [-180, -85],
 ];
 
-function outerRingsOf(feature: GeoJSON.Feature<BoundaryGeometry>): [number, number][][] {
-  if (feature.geometry.type === "Polygon") return [feature.geometry.coordinates[0] as [number, number][]];
-  return feature.geometry.coordinates.map((polygon) => polygon[0] as [number, number][]);
-}
+const WORLD_POLYGON: GeoJSON.Feature<GeoJSON.Polygon> = {
+  type: "Feature",
+  properties: {},
+  geometry: { type: "Polygon", coordinates: [WORLD_RING] },
+};
 
-function spotlightMaskFor(destinations: SearchDestination[]): GeoJSON.Feature<GeoJSON.Polygon> | null {
+function spotlightMaskFor(
+  destinations: SearchDestination[],
+): GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null {
   if (destinations.length === 0) return null;
   // One point-shaped selection is enough to switch the scrim off entirely.
   if (destinations.some((d) => d.type === "city" || d.type === "place")) return null;
 
-  const holes: [number, number][][] = [];
+  const selected: GeoJSON.Feature<BoundaryGeometry>[] = [];
   for (const destination of destinations) {
     const boundary =
       destination.type === "country"
@@ -344,15 +350,24 @@ function spotlightMaskFor(destinations: SearchDestination[]): GeoJSON.Feature<Ge
         : destination.type === "region"
           ? getRegionBoundary(destination.name)
           : undefined;
-    if (boundary) holes.push(...outerRingsOf(boundary));
+    if (boundary) selected.push(boundary);
   }
-  if (holes.length === 0) return null;
+  if (selected.length === 0) return null;
 
-  return {
-    type: "Feature",
-    properties: {},
-    geometry: { type: "Polygon", coordinates: [WORLD_RING, ...holes] },
-  };
+  // Union before subtracting, always — even for a single selection, so the path is one
+  // code path rather than two.
+  //
+  // Cutting each country's rings as separate holes in one polygon looked equivalent and
+  // was not: neighbouring countries share their border vertex for vertex (Thailand and
+  // Laos share 132 of them), and two holes touching along an entire border is degenerate
+  // for the triangulator. It rendered as wide diagonal bands of scrim slicing across the
+  // lit area. The union dissolves the shared border into a single ring, after which the
+  // difference produces holes that never touch.
+  const merged = selected.length === 1 ? selected[0] : turfUnion(featureCollection(selected));
+  if (!merged) return null;
+  return turfDifference(featureCollection([WORLD_POLYGON, merged])) as GeoJSON.Feature<
+    GeoJSON.Polygon | GeoJSON.MultiPolygon
+  > | null;
 }
 
 // Bounding box the map should open on for a set of searched destinations — the bridge

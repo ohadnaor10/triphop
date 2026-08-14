@@ -176,7 +176,7 @@ export type TripMapProps = {
    * selection, dimmed so the area in question reads at a glance. Null when nothing is
    * selected, or when a selection has no area to cut a hole from (see page.tsx).
    */
-  spotlightMask: GeoJSON.Feature<GeoJSON.Polygon> | null;
+  spotlightMask: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null;
   onSelectPost: (postId: string) => void;
   /**
    * A cluster that zooming can never separate — every member on one coordinate, or a
