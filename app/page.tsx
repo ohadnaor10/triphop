@@ -88,6 +88,9 @@ export type Post = {
 
 // ---------- Static reference data ----------
 
+// Zoom at which country-level "no city chosen" markers start being drawn — see mapClusters.
+const GHOST_MIN_ZOOM = 5;
+
 const TRIP_STYLES: TripVibe[] = ["Backpacking", "Road Trip", "Luxury", "Chill", "Adventure", "Culture"];
 const GENDERS: Gender[] = ["Male", "Female"];
 
@@ -1283,7 +1286,14 @@ function HomePageContent() {
         bounds: [aggregate.lng, aggregate.lat, aggregate.lng, aggregate.lat] as [number, number, number, number],
       }));
     }
-    return clusterLocations([...mapLocations, ...ghostLocations], mapViewport?.zoom ?? 2);
+    const zoom = mapViewport?.zoom ?? 2;
+    // Ghosts are held back until the map is showing roughly one country. They stand for a
+    // whole country rather than a place in it, so at continental zoom they crowd out the
+    // markers that do mean something — and a dashed circle over half of Africa says very
+    // little. Once you're looking at a single country, "someone is going here, no city
+    // chosen" is worth knowing.
+    const visible = zoom >= GHOST_MIN_ZOOM ? [...mapLocations, ...ghostLocations] : mapLocations;
+    return clusterLocations(visible, zoom);
   }, [mapLocations, ghostLocations, mapOverview, mapViewport?.zoom]);
 
   // The list sheet a non-splittable cluster (or a country ghost) opens, plus the state
@@ -1378,6 +1388,8 @@ function HomePageContent() {
   // Fetched rather than filtered from the loaded set: a trip's other cities are usually
   // off-screen, which is exactly why focusing has to reframe the camera around them.
   const focusedMapPlaces = useFocusedPostPlaces(focusedMapPostId);
+  // Every country the focused post names, pinned or not — all of them get shaded, so the
+  // trip's full geographic footprint reads at a glance rather than just the dots.
   const focusedMapCountryCodes = useMemo(
     () =>
       focusedMapPost
@@ -1385,6 +1397,23 @@ function HomePageContent() {
             ...new Set(
               focusedMapPost.destinations
                 .filter((d): d is FocusedDestination => d.mode === "focused")
+                .map((d) => d.countryCode),
+            ),
+          ]
+        : [],
+    [focusedMapPost],
+  );
+
+  // The subset with no city chosen. Only these widen the camera: a country that already
+  // contributes pins is represented by them, and fitting all of Thailand to show one
+  // Bangkok pin would undo the close framing a single-destination post is meant to get.
+  const focusedMapUnpinnedCountryCodes = useMemo(
+    () =>
+      focusedMapPost
+        ? [
+            ...new Set(
+              focusedMapPost.destinations
+                .filter((d): d is FocusedDestination => d.mode === "focused" && d.cities.length === 0)
                 .map((d) => d.countryCode),
             ),
           ]
@@ -1668,6 +1697,7 @@ function HomePageContent() {
                   focusedMapPostId={focusedMapPostId}
                   focusedPlaces={focusedMapPlaces}
                   focusedCountryCodes={focusedMapCountryCodes}
+                  focusedUnpinnedCountryCodes={focusedMapUnpinnedCountryCodes}
                   setFocusedMapPostId={(id) => (id === null ? clearMapFocus() : setFocusedMapPostId(id))}
                   onOpenClusterList={openClusterList}
                   spotlightMask={spotlightMask}

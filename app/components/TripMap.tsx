@@ -165,12 +165,14 @@ export type TripMapProps = {
    * hiding all clusters and avatars so the trip is read on its own.
    */
   focusedPlaces: FocusedPlace[];
-  /**
-   * Countries to shade behind the focused post. Normally empty — a post with cities shows
-   * pins instead — but a country-only post has no point to pin, so its country is tinted
-   * to make focus visible at all.
-   */
+  /** Every country the focused post names — all shaded behind its pins. */
   focusedCountryCodes: string[];
+  /**
+   * The subset with no city chosen. These widen the camera, because nothing else on the
+   * map represents them; countries that already have pins do not, or a one-city post would
+   * be framed to its whole country.
+   */
+  focusedUnpinnedCountryCodes: string[];
   /**
    * Everything *outside* the searched destinations, as one polygon with a hole per
    * selection, dimmed so the area in question reads at a glance. Null when nothing is
@@ -198,6 +200,7 @@ export default function TripMap({
   focusedPostId,
   focusedPlaces,
   focusedCountryCodes,
+  focusedUnpinnedCountryCodes,
   onSelectPost,
   onViewportChange,
   initialBounds,
@@ -388,33 +391,31 @@ export default function TripMap({
     const map = mapRef.current;
     if (!map || !isStyleLoaded) return;
 
-    // A country-only post has nothing to pin, so the camera frames the country itself.
-    if (focusedPlaces.length === 0) {
-      if (focusedCountryCodes.length === 0) return;
-      const boundary = toBoundaryFeatureCollection(focusedCountryCodes);
-      if (boundary.features.length === 0) return;
-      const [minLng, minLat, maxLng, maxLat] = turfBbox(boundary) as [number, number, number, number];
-      map.fitBounds(
-        [
-          [minLng, minLat],
-          [maxLng, maxLat],
-        ],
-        { padding: 40, maxZoom: SINGLE_PLACE_FOCUS_ZOOM, duration: 700, essential: true },
-      );
+    // Everything the post covers: its pinned cities and any country it named without one.
+    // Framing only the pins left the shaded country off-screen, so a trip that was half
+    // decided looked entirely decided.
+    const shaded = toBoundaryFeatureCollection(focusedUnpinnedCountryCodes);
+    const hasShading = shaded.features.length > 0;
+    if (focusedPlaces.length === 0 && !hasShading) return;
+
+    // A lone city has no extent to fit, and no shaded country to widen it — centre instead,
+    // or fitBounds would zoom to the maximum on a zero-area box.
+    if (focusedPlaces.length === 1 && !hasShading) {
+      const [only] = focusedPlaces;
+      map.easeTo({ center: [only.lng, only.lat], zoom: SINGLE_PLACE_FOCUS_ZOOM, duration: 700, essential: true });
       return;
     }
 
-    const [first] = focusedPlaces;
-    if (focusedPlaces.length === 1) {
-      map.easeTo({ center: [first.lng, first.lat], zoom: SINGLE_PLACE_FOCUS_ZOOM, duration: 700, essential: true });
-      return;
+    const bounds = new mapboxgl.LngLatBounds();
+    for (const place of focusedPlaces) bounds.extend([place.lng, place.lat] as [number, number]);
+    if (hasShading) {
+      const [minLng, minLat, maxLng, maxLat] = turfBbox(shaded) as [number, number, number, number];
+      bounds.extend([minLng, minLat]);
+      bounds.extend([maxLng, maxLat]);
     }
-    const bounds = focusedPlaces.reduce(
-      (acc, place) => acc.extend([place.lng, place.lat] as [number, number]),
-      new mapboxgl.LngLatBounds([first.lng, first.lat], [first.lng, first.lat]),
-    );
-    map.fitBounds(bounds, { padding: 70, maxZoom: SINGLE_PLACE_FOCUS_ZOOM, duration: 700, essential: true });
-  }, [focusedPlaces, focusedCountryCodes, isStyleLoaded]);
+    if (bounds.isEmpty()) return;
+    map.fitBounds(bounds, { padding: 60, maxZoom: SINGLE_PLACE_FOCUS_ZOOM, duration: 700, essential: true });
+  }, [focusedPlaces, focusedUnpinnedCountryCodes, isStyleLoaded]);
 
   // Everything outside the searched destinations, dimmed. Drawn as a single polygon
   // covering the world with a hole cut for each selection, which is why one fill can dim
@@ -454,17 +455,15 @@ export default function TripMap({
     });
   }, [spotlightMask, isStyleLoaded]);
 
-  // Country shading. Off for posts that have pins (SHOW_FOCUSED_COUNTRY_SHADING) — a
-  // country-sized fill just tints the whole viewport at the zoom focusing lands on. But a
-  // country-only post has nothing to pin, so shading its country is the only way focus
-  // reads as focus at all, and for those the caller passes country codes through.
+  // Every country the focused post names, tinted behind its pins. Shading used to be
+  // suppressed whenever a post had any pins at all, which meant a trip that was specific
+  // about one country and vague about another ("Bangkok, then somewhere in Laos") showed
+  // only the Bangkok pin — the vague half of it simply vanished while focused.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !isStyleLoaded) return;
 
-    const boundaryData = toBoundaryFeatureCollection(
-      SHOW_FOCUSED_COUNTRY_SHADING || focusedPlaces.length === 0 ? focusedCountryCodes : [],
-    );
+    const boundaryData = toBoundaryFeatureCollection(focusedCountryCodes);
     const source = map.getSource(BOUNDARY_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
     if (source) {
       source.setData(boundaryData);

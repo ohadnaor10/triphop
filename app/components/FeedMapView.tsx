@@ -30,6 +30,8 @@ export type FeedMapViewProps = {
   /** Destinations of the focused post; while non-empty the map shows only these. */
   focusedPlaces: FocusedPlace[];
   focusedCountryCodes: string[];
+  /** Countries with no city chosen — these widen the focus camera; see TripMap. */
+  focusedUnpinnedCountryCodes: string[];
   setFocusedMapPostId: (id: string | null) => void;
   focusedMapPost: Post | null;
   setViewPostId: (id: string | null) => void;
@@ -51,6 +53,7 @@ export function FeedMapView({
   focusedMapPostId,
   focusedPlaces,
   focusedCountryCodes,
+  focusedUnpinnedCountryCodes,
   setFocusedMapPostId,
   focusedMapPost,
   setViewPostId,
@@ -77,6 +80,7 @@ export function FeedMapView({
           focusedPostId={focusedMapPostId}
           focusedPlaces={focusedPlaces}
           focusedCountryCodes={focusedCountryCodes}
+          focusedUnpinnedCountryCodes={focusedUnpinnedCountryCodes}
           onSelectPost={(id) => setFocusedMapPostId(id)}
           onOpenClusterList={onOpenClusterList}
           spotlightMask={spotlightMask}
