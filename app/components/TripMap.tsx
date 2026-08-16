@@ -77,6 +77,13 @@ const AVATAR_GRADIENTS: Record<string, string> = {
 // document flow, and turn the transform into an offset from the wrong origin — markers
 // land nowhere near their real lng/lat and stack against each other.
 function createAvatarElement(cluster: MapCluster, focused: boolean, dimmed = false): HTMLDivElement {
+  // Mapbox's Marker re-evaluates and overwrites `style.opacity` on its root element every
+  // render frame (fog/globe/terrain occlusion — see Marker._evaluateOpacity), which fights
+  // anything set here directly and always wins. Dimming has to live one layer below that,
+  // on a child Mapbox never touches, or it gets silently snapped back to full opacity.
+  const outer = document.createElement("div");
+  outer.style.cursor = "pointer";
+
   const wrapper = document.createElement("div");
   const author = cluster.author;
   // A ghost stands for a country, not a spot on it, so it is drawn deliberately unlike a
@@ -104,10 +111,11 @@ function createAvatarElement(cluster: MapCluster, focused: boolean, dimmed = fal
     wrapper.appendChild(initials);
   }
 
-  wrapper.title = ghost
+  outer.title = ghost
     ? `Somewhere in ${cluster.label} · no city set`
     : `${author?.name ?? "Traveler"} · ${cluster.label}`;
-  return wrapper;
+  outer.appendChild(wrapper);
+  return outer;
 }
 
 // A focused post's own destinations, each labelled: a three-city trip should be readable
@@ -131,8 +139,13 @@ function createLabelledPinElement(place: FocusedPlace): HTMLDivElement {
 // Aggregate tiers render as a count bubble rather than a pin: at continent/country/city
 // zoom the exact coordinate is meaningless, and the number is the actual information.
 function createBubbleElement(cluster: MapCluster, dimmed = false): HTMLDivElement {
+  // See createAvatarElement above: Mapbox overwrites `style.opacity` on whatever element
+  // is passed as the marker's root every render frame, so the dimmed look has to sit on a
+  // child instead of the outer node.
+  const outer = document.createElement("div");
+  outer.style.cursor = "pointer";
+
   const wrapper = document.createElement("div");
-  wrapper.style.cursor = "pointer";
   // Area, not diameter, tracks the count — sqrt keeps a 100-post bubble from dwarfing a
   // 10-post one by a factor of ten.
   const size = Math.min(64, 34 + Math.sqrt(cluster.postCount) * 4);
@@ -148,10 +161,11 @@ function createBubbleElement(cluster: MapCluster, dimmed = false): HTMLDivElemen
   count.textContent = String(cluster.postCount);
   count.style.cssText = "font-size:13px;font-weight:800;";
   wrapper.appendChild(count);
-  wrapper.title = ghost
+  outer.title = ghost
     ? `${cluster.label} · ${cluster.postCount} trips with no city set`
     : `${cluster.label} · ${cluster.postCount} ${cluster.postCount === 1 ? "trip" : "trips"}`;
-  return wrapper;
+  outer.appendChild(wrapper);
+  return outer;
 }
 
 export type TripMapProps = {
