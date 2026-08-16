@@ -26,6 +26,10 @@ const MIN_ZOOM = 1.5;
 // place the city in its surroundings, not so close that all context is lost.
 const SINGLE_PLACE_FOCUS_ZOOM = 7;
 
+// Applied to every marker outside the focused trip while one is open — dimmed rather than
+// removed, so the rest of the map still reads as real context instead of empty space.
+const DIMMED_MARKER_OPACITY = 0.2;
+
 // How far in the camera is allowed to go, and therefore the zoom at which "can this
 // cluster ever be broken apart?" is decided.
 const MAX_ZOOM = 18;
@@ -72,7 +76,7 @@ const AVATAR_GRADIENTS: Record<string, string> = {
 // inline `position: relative` would out-specificity the class, pull the marker into normal
 // document flow, and turn the transform into an offset from the wrong origin — markers
 // land nowhere near their real lng/lat and stack against each other.
-function createAvatarElement(cluster: MapCluster, focused: boolean): HTMLDivElement {
+function createAvatarElement(cluster: MapCluster, focused: boolean, dimmed = false): HTMLDivElement {
   const wrapper = document.createElement("div");
   const author = cluster.author;
   // A ghost stands for a country, not a spot on it, so it is drawn deliberately unlike a
@@ -82,6 +86,7 @@ function createAvatarElement(cluster: MapCluster, focused: boolean): HTMLDivElem
   wrapper.style.cssText = `width:36px;height:36px;border-radius:9999px;overflow:hidden;cursor:pointer;
     border:2px ${ghost ? "dashed #64748b" : `solid ${focused ? "#f97316" : "#ffffff"}`};
     ${ghost ? "opacity:0.72;" : "box-shadow:0 2px 6px rgba(15,23,42,0.35);"}
+    ${dimmed ? `opacity:${DIMMED_MARKER_OPACITY};` : ""}
     display:flex;align-items:center;justify-content:center;background:#e2e8f0;`;
 
   if (author?.avatarUrl) {
@@ -125,7 +130,7 @@ function createLabelledPinElement(place: FocusedPlace): HTMLDivElement {
 
 // Aggregate tiers render as a count bubble rather than a pin: at continent/country/city
 // zoom the exact coordinate is meaningless, and the number is the actual information.
-function createBubbleElement(cluster: MapCluster): HTMLDivElement {
+function createBubbleElement(cluster: MapCluster, dimmed = false): HTMLDivElement {
   const wrapper = document.createElement("div");
   wrapper.style.cursor = "pointer";
   // Area, not diameter, tracks the count — sqrt keeps a 100-post bubble from dwarfing a
@@ -137,7 +142,8 @@ function createBubbleElement(cluster: MapCluster): HTMLDivElement {
   wrapper.style.cssText = `width:${size}px;height:${size}px;border-radius:9999px;
     background:${ghost ? "rgba(100,116,139,0.85)" : "rgba(249,115,22,0.92)"};
     color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;
-    border:2px ${ghost ? "dashed #e2e8f0" : "solid #fff"};box-shadow:0 2px 6px rgba(15,23,42,0.35);cursor:pointer;`;
+    border:2px ${ghost ? "dashed #e2e8f0" : "solid #fff"};box-shadow:0 2px 6px rgba(15,23,42,0.35);cursor:pointer;
+    ${dimmed ? `opacity:${DIMMED_MARKER_OPACITY};` : ""}`;
   const count = document.createElement("span");
   count.textContent = String(cluster.postCount);
   count.style.cssText = "font-size:13px;font-weight:800;";
@@ -329,11 +335,11 @@ export default function TripMap({
     markersRef.current.forEach((m) => m.remove());
     const markers: mapboxgl.Marker[] = [];
 
-    // Focus mode: the focused post replaces everything else on the map, so its trip reads
-    // on its own instead of having to be picked out of a crowd of other people's markers.
-    // Keyed on the focused id rather than on its places, because a country-only post has
-    // no places at all and still needs the rest of the map cleared — for those, the
-    // country shading below is what makes the focus visible.
+    // Focus mode: the focused post gets its own labelled pins so its trip reads on its
+    // own, drawn on top of everything else rather than in place of it. Keyed on the
+    // focused id rather than on its places, because a country-only post has no places at
+    // all and still gets labelled pins skipped — for those, the country shading below is
+    // what makes the focus visible.
     if (focusedPostId) {
       for (const place of focusedPlaces) {
         markers.push(
@@ -342,20 +348,23 @@ export default function TripMap({
             .addTo(map),
         );
       }
-      markersRef.current = markers;
-      return () => {
-        markersRef.current.forEach((m) => m.remove());
-        markersRef.current = [];
-      };
     }
 
     for (const cluster of clusters) {
+      // The focused trip's own spots are already drawn above as labelled pins — skipping
+      // any cluster that contains them here is what keeps those spots from also being
+      // rendered merged into a bubble with other trips' markers.
+      if (focusedPostId && cluster.postIds.includes(focusedPostId)) continue;
+
       // A cluster of one is a single post — drawn as its author's avatar, and tapping it
       // opens that post rather than zooming into it.
       const isSinglePost = cluster.postId !== null;
+      // Dimmed, not hidden, while a trip is focused: DIMMED_MARKER_OPACITY keeps the rest
+      // of the map legible as context instead of vanishing every other traveler.
+      const dimmed = Boolean(focusedPostId);
       const element = isSinglePost
-        ? createAvatarElement(cluster, cluster.postId === focusedPostId)
-        : createBubbleElement(cluster);
+        ? createAvatarElement(cluster, cluster.postId === focusedPostId, dimmed)
+        : createBubbleElement(cluster, dimmed);
 
       element.addEventListener("click", (e) => {
         e.stopPropagation();
