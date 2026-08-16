@@ -32,10 +32,10 @@ const SUBREGION_TO_REGION = {
   "Central America": "North America",
   Caribbean: "North America",
   "South America": "South America",
-  "Eastern Asia": "East Asia/SE Asia",
-  "South-Eastern Asia": "East Asia/SE Asia",
-  "Southern Asia": "East Asia/SE Asia",
-  "Central Asia": "East Asia/SE Asia",
+  "Eastern Asia": "Asia",
+  "Southern Asia": "Asia",
+  "Central Asia": "Asia",
+  "South-Eastern Asia": "Southeast Asia",
   "Western Asia": "Middle East",
   "Australia and New Zealand": "Australia",
   Melanesia: "Australia",
@@ -50,7 +50,7 @@ const SUBREGION_TO_REGION = {
 
 const REGION_FALLBACK = {
   Americas: "North America",
-  Asia: "East Asia/SE Asia",
+  Asia: "Asia",
   Africa: "Africa",
   Europe: "Europe",
   Oceania: "Australia",

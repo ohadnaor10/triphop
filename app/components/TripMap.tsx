@@ -6,6 +6,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef, useState } from "react";
 import { getCountryBoundary } from "../lib/geo";
 import { canSplitByZooming, type MapCluster } from "../lib/cluster";
+import { MIN_ZOOM } from "../lib/mapConfig";
 import type { FocusedPlace, MapViewport } from "../lib/mapStore";
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
@@ -18,17 +19,13 @@ const SPOTLIGHT_LINE_LAYER = `${SPOTLIGHT_SOURCE_ID}-line`;
 const TRIP_LINK_SOURCE_ID = "trip-map-trip-links";
 const TRIP_LINK_LAYER = `${TRIP_LINK_SOURCE_ID}-line`;
 
-// How far out the map can be zoomed. Below this the whole globe (and then copies of it)
-// fits on screen, where every marker collapses into a handful of meaningless blobs and
-// panning stops meaning anything — so the camera simply doesn't go there.
-const MIN_ZOOM = 1.5;
 // A focused post with a single destination has no extent to fit either — close enough to
 // place the city in its surroundings, not so close that all context is lost.
 const SINGLE_PLACE_FOCUS_ZOOM = 7;
 
 // Applied to every marker outside the focused trip while one is open — dimmed rather than
 // removed, so the rest of the map still reads as real context instead of empty space.
-const DIMMED_MARKER_OPACITY = 0.4;
+const DIMMED_MARKER_OPACITY = 0.6;
 
 // How far in the camera is allowed to go, and therefore the zoom at which "can this
 // cluster ever be broken apart?" is decided.

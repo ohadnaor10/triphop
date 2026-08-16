@@ -416,7 +416,7 @@ export const INITIAL_POSTS: Post[] = [
     id: "36",
     userId: "seed-user-36",
     user: { name: "Sofia Moretti", age: 26, gender: "Female", avatarColor: AVATAR_COLORS[0] },
-    destinations: [{ mode: "broad", regions: ["East Asia/SE Asia"] }],
+    destinations: [{ mode: "broad", regions: ["Southeast Asia"] }],
     date: { mode: "flexible", earliest: "2026-10-15", latest: "2026-12-01" },
     vibes: ["Backpacking", "Culture"],
     bio: "First big SE Asia loop, exact countries TBD based on visas and weather — thinking Vietnam, Laos, Cambodia. Slow travel, overland where possible.",

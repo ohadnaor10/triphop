@@ -310,7 +310,7 @@ async function getDestinationPoints(destinations: Destination[]): Promise<GeoPoi
       const queries = destinationQueries(destination);
       return Promise.all(
         queries.map(async ({ name, query, tier, countryCode }) => {
-          // Broad regions are this app's own taxonomy buckets (e.g. "East Asia/SE Asia"),
+          // Broad regions are this app's own taxonomy buckets (e.g. "Southeast Asia"),
           // not real place names — geocoding them against a live places API just returns
           // whatever fuzzy-matches the text (which can land anywhere on the globe), so
           // always use the curated centroid instead.

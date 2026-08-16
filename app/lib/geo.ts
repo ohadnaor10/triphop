@@ -1,5 +1,6 @@
 import turfArea from "@turf/area";
 import turfBbox from "@turf/bbox";
+import { bboxClip } from "@turf/bbox-clip";
 import turfUnion from "@turf/union";
 import { City, Country } from "country-state-city";
 import worldCountries from "world-countries";
@@ -18,14 +19,15 @@ export const REGIONS = [
   "Europe",
   "North America",
   "South America",
-  "East Asia/SE Asia",
+  "Asia",
+  "Southeast Asia",
   "Australia",
   "Middle East",
   "Africa",
 ] as const;
 export type Region = (typeof REGIONS)[number];
 
-// UN subregions bucketed into this app's 7-region travel taxonomy.
+// UN subregions bucketed into this app's 8-region travel taxonomy.
 const SUBREGION_TO_REGION: Record<string, Region> = {
   "Northern Europe": "Europe",
   "Western Europe": "Europe",
@@ -37,10 +39,10 @@ const SUBREGION_TO_REGION: Record<string, Region> = {
   "Central America": "North America",
   Caribbean: "North America",
   "South America": "South America",
-  "Eastern Asia": "East Asia/SE Asia",
-  "South-Eastern Asia": "East Asia/SE Asia",
-  "Southern Asia": "East Asia/SE Asia",
-  "Central Asia": "East Asia/SE Asia",
+  "Eastern Asia": "Asia",
+  "Southern Asia": "Asia",
+  "Central Asia": "Asia",
+  "South-Eastern Asia": "Southeast Asia",
   "Western Asia": "Middle East",
   "Australia and New Zealand": "Australia",
   Melanesia: "Australia",
@@ -55,7 +57,7 @@ const SUBREGION_TO_REGION: Record<string, Region> = {
 
 const REGION_FALLBACK: Record<string, Region> = {
   Americas: "North America",
-  Asia: "East Asia/SE Asia",
+  Asia: "Asia",
   Africa: "Africa",
   Europe: "Europe",
   Oceania: "Australia",
@@ -65,7 +67,8 @@ export const REGION_CENTROIDS: Record<Region, { lat: number; lng: number }> = {
   Europe: { lat: 54, lng: 15 },
   "North America": { lat: 45, lng: -100 },
   "South America": { lat: -15, lng: -60 },
-  "East Asia/SE Asia": { lat: 15, lng: 105 },
+  Asia: { lat: 35, lng: 95 },
+  "Southeast Asia": { lat: 8, lng: 110 },
   Australia: { lat: -25, lng: 135 },
   "Middle East": { lat: 27, lng: 45 },
   Africa: { lat: 2, lng: 20 },
@@ -163,20 +166,81 @@ export function getCountryBoundary(isoCode: string): GeoJSON.Feature<BoundaryGeo
 
 let regionBoundaries: Map<Region, GeoJSON.Feature<BoundaryGeometry>> | null = null;
 
-// A region ("East Asia/SE Asia", ...) is this app's own multi-country grouping, not a
-// real admin area with its own boundary data — so its shape is built by dissolving every
-// member country's real polygon (the same geometry already used to draw individual
+// Russia is the only country in this taxonomy whose real territory straddles two
+// regions — folding all of it into "Europe" (its UN subregion, "Eastern Europe") makes
+// the shaded region balloon across all of Siberia. Split at ~60°E instead, roughly the
+// Ural Mountains, the conventional continental divide: everything west feeds Europe's
+// shape, everything east feeds Asia's. 200°E (not 180°) as the eastern edge because this
+// data is antimeridian-unwrapped (see countryBoundariesData's header comment) — Russia's
+// far-east coastline is stored past +180 rather than wrapped to -180.
+const EUROPE_ASIA_DIVIDE_LNG = 60;
+const RUSSIA_EUROPEAN_BBOX: [number, number, number, number] = [-180, -90, EUROPE_ASIA_DIVIDE_LNG, 90];
+const RUSSIA_ASIAN_BBOX: [number, number, number, number] = [EUROPE_ASIA_DIVIDE_LNG, -90, 200, 90];
+
+// bboxClip's own docs warn it "may result in degenerate edges when clipping Polygons" —
+// in practice, every one of Russia's 25 sub-polygons that falls entirely outside the clip
+// bbox comes back as a polygon with zero rings (`[]`) rather than being dropped, and
+// turfUnion throws ("Input geometry is not a valid Polygon or MultiPolygon") the moment it
+// hits one. Stripping those empty shells — and any ring too short to be a closed
+// loop — is what makes the clipped halves safe to feed into the same union() call as
+// every other country's untouched boundary.
+function sanitizeClippedBoundary(
+  feature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+): GeoJSON.Feature<BoundaryGeometry> {
+  const { geometry } = feature;
+  if (geometry.type === "Polygon") {
+    return { ...feature, geometry: { type: "Polygon", coordinates: geometry.coordinates.filter((ring) => ring.length >= 4) } };
+  }
+  return {
+    ...feature,
+    geometry: {
+      type: "MultiPolygon",
+      coordinates: geometry.coordinates
+        .map((polygon) => polygon.filter((ring) => ring.length >= 4))
+        .filter((polygon) => polygon.length > 0),
+    },
+  };
+}
+
+function isEmptyGeometry(geometry: GeoJSON.Geometry): boolean {
+  return "coordinates" in geometry && geometry.coordinates.length === 0;
+}
+
+// A region ("Asia", "Southeast Asia", ...) is this app's own multi-country grouping, not
+// a real admin area with its own boundary data — so its shape is built by dissolving
+// every member country's real polygon (the same geometry already used to draw individual
 // countries) into one seamless shape, rather than a collection with internal borders.
 function getRegionBoundaries(): Map<Region, GeoJSON.Feature<BoundaryGeometry>> {
   if (!regionBoundaries) {
     regionBoundaries = new Map();
     const featuresByRegion = new Map<Region, GeoJSON.Feature<BoundaryGeometry>[]>();
     for (const [isoCode, region] of Object.entries(ISO_TO_REGION)) {
+      // Handled separately below — split rather than assigned whole to one region.
+      if (isoCode === "RU") continue;
       const boundary = getCountryBoundary(isoCode);
       if (!boundary) continue;
       const existing = featuresByRegion.get(region) ?? [];
       featuresByRegion.set(region, [...existing, boundary]);
     }
+
+    const russia = getCountryBoundary("RU");
+    if (russia) {
+      // Russia's boundary is always a Polygon/MultiPolygon (BoundaryGeometry), so clipping
+      // it can never produce the LineString/MultiLineString half of bboxClip's return type.
+      const european = sanitizeClippedBoundary(
+        bboxClip(russia, RUSSIA_EUROPEAN_BBOX) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+      );
+      const asian = sanitizeClippedBoundary(
+        bboxClip(russia, RUSSIA_ASIAN_BBOX) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+      );
+      if (!isEmptyGeometry(european.geometry)) {
+        featuresByRegion.set("Europe", [...(featuresByRegion.get("Europe") ?? []), european]);
+      }
+      if (!isEmptyGeometry(asian.geometry)) {
+        featuresByRegion.set("Asia", [...(featuresByRegion.get("Asia") ?? []), asian]);
+      }
+    }
+
     for (const [region, features] of featuresByRegion) {
       if (features.length === 0) continue;
       if (features.length === 1) {

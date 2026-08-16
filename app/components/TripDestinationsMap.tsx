@@ -6,6 +6,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useEffect, useRef } from "react";
 import { getCountryBoundary, getRegionBoundary, type Region } from "../lib/geo";
+import { MIN_ZOOM } from "../lib/mapConfig";
 
 export type DestinationPoint = {
   name: string;
@@ -40,9 +41,10 @@ function localRadiusKm(point: DestinationPoint): number {
 
 // Real (simplified) administrative boundary polygon from world-atlas when we have one
 // for this country; otherwise fall back to a circle so we still render *something*
-// closer to a real footprint than a rectangle. Broad regions ("East Asia/SE Asia", ...)
-// have no boundary data of their own — they're this app's own multi-country groupings —
-// so they use the real shape built by merging their member countries' polygons instead.
+// closer to a real footprint than a rectangle. Broad regions ("Asia", "Southeast Asia",
+// ...) have no boundary data of their own — they're this app's own multi-country
+// groupings — so they use the real shape built by merging their member countries'
+// polygons instead.
 function toCountryFeature(point: DestinationPoint): NamedFeature {
   const boundary =
     point.tier === "region"
@@ -109,6 +111,7 @@ export default function TripDestinationsMap({ points }: { points: DestinationPoi
       style: "mapbox://styles/mapbox/outdoors-v12",
       center,
       zoom: 4,
+      minZoom: MIN_ZOOM,
     });
     mapRef.current.addControl(new mapboxgl.NavigationControl(), "top-right");
 
