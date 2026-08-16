@@ -28,7 +28,7 @@ const SINGLE_PLACE_FOCUS_ZOOM = 7;
 
 // Applied to every marker outside the focused trip while one is open — dimmed rather than
 // removed, so the rest of the map still reads as real context instead of empty space.
-const DIMMED_MARKER_OPACITY = 0.2;
+const DIMMED_MARKER_OPACITY = 0.4;
 
 // How far in the camera is allowed to go, and therefore the zoom at which "can this
 // cluster ever be broken apart?" is decided.
