@@ -24,7 +24,7 @@ const TRIP_LINK_LAYER = `${TRIP_LINK_SOURCE_ID}-line`;
 const MIN_ZOOM = 1.5;
 // A focused post with a single destination has no extent to fit either — close enough to
 // place the city in its surroundings, not so close that all context is lost.
-const SINGLE_PLACE_FOCUS_ZOOM = 9;
+const SINGLE_PLACE_FOCUS_ZOOM = 7;
 
 // How far in the camera is allowed to go, and therefore the zoom at which "can this
 // cluster ever be broken apart?" is decided.
