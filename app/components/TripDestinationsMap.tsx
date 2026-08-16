@@ -97,7 +97,18 @@ function attachTooltipHandlers(map: mapboxgl.Map, fillLayerId: string) {
   });
 }
 
-export default function TripDestinationsMap({ points }: { points: DestinationPoint[] }) {
+export type TripDestinationsMapProps = {
+  points: DestinationPoint[];
+  /**
+   * False while the map is mounted but hidden behind the closed modal — see
+   * hasOpenedTripMap in page.tsx, which keeps this component (and its one Mapbox map
+   * instance) alive across opens instead of remounting a fresh one, and therefore a fresh
+   * billed map load, every time "Show Trip Map" is tapped.
+   */
+  isVisible: boolean;
+};
+
+export default function TripDestinationsMap({ points, isVisible }: TripDestinationsMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
@@ -185,6 +196,16 @@ export default function TripDestinationsMap({ points }: { points: DestinationPoi
       map.once("load", render);
     }
   }, [points]);
+
+  // Coming back to an already-open-once map: `display: none` (see page.tsx) collapses the
+  // container to zero size while hidden, and Mapbox caches the dimensions it was last
+  // laid out with, so without an explicit resize the map returns stretched or blank —
+  // mirrors the same fix in TripMap for the Feed/Map toggle.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isVisible) return;
+    map.resize();
+  }, [isVisible]);
 
   useEffect(() => {
     const map = mapRef.current;

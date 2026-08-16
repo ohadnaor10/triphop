@@ -1,4 +1,3 @@
-import dynamic from "next/dynamic";
 import type { useRouter } from "next/navigation";
 import {
   IconCalendar,
@@ -12,17 +11,9 @@ import {
   IconWhatsApp,
   IconX,
 } from "./icons";
-import type { DestinationPoint } from "./TripDestinationsMap";
 import Avatar from "./Avatar";
 import type { AuthUser } from "../context/AuthContext";
 import type { Gender, Post, TripVibe } from "../page";
-
-const TripDestinationsMap = dynamic(() => import("./TripDestinationsMap"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex h-full items-center justify-center text-sm text-slate-400">Loading map…</div>
-  ),
-});
 
 export type ViewedProfile = {
   name: string;
@@ -48,23 +39,21 @@ export type PostDetailViewProps = {
   revealContact: (postId: string) => Promise<string | null>;
   setRevealedContact: (contact: string | null) => void;
   onClose: () => void;
-  isTripMapOpen: boolean;
   setIsTripMapOpen: (open: boolean) => void;
-  tripMapPoints: DestinationPoint[];
   vibeStyles: Record<TripVibe, string>;
   initials: (name: string) => string;
   formatGender: (gender: Gender) => string;
   formatRelativeTime: (iso: string) => string;
   getDateLabel: (date: Post["date"], compact?: boolean) => string;
-  getDestinationLabel: (destinations: Post["destinations"]) => string;
 };
 
 // Full-screen view for a selected post: destination chips, dates, user info, vibe
-// tags, and description. Also renders the Trip Map modal (opened from "Show Trip
-// Map") — tightly coupled to this view's open/close state, so it lives here as a
-// sibling rather than being separately mounted from page.tsx. The User Profile
-// overlay is a separate component (UserProfileOverlay below) since it's reachable
-// independently of a post being open (e.g. via a /?user=<id> deep link).
+// tags, and description. The "Show Trip Map" button here only flips isTripMapOpen —
+// the modal itself is mounted from page.tsx, not from here, so it can stay alive (and
+// keep its one Mapbox map instance) across this view unmounting; see hasOpenedTripMap
+// there. The User Profile overlay is a separate component (UserProfileOverlay below)
+// since it's reachable independently of a post being open (e.g. via a /?user=<id> deep
+// link).
 export function PostDetailView({
   viewPost,
   viewPostDestinationChips,
@@ -80,15 +69,12 @@ export function PostDetailView({
   revealContact,
   setRevealedContact,
   onClose,
-  isTripMapOpen,
   setIsTripMapOpen,
-  tripMapPoints,
   vibeStyles,
   initials,
   formatGender,
   formatRelativeTime,
   getDateLabel,
-  getDestinationLabel,
 }: PostDetailViewProps) {
   return (
     <>
@@ -270,30 +256,6 @@ export function PostDetailView({
           )}
         </div>
       </div>
-
-      {/* Trip Map modal */}
-      {isTripMapOpen && (
-        <div className="fixed inset-0 z-[1300] flex flex-col bg-white sm:items-center sm:justify-center sm:bg-slate-900/40 sm:p-4">
-          <div className="flex h-full w-full max-w-lg flex-col overflow-hidden bg-white sm:h-[80dvh] sm:rounded-3xl sm:shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-              <h2 className="min-w-0 truncate text-sm font-bold text-slate-900">
-                {getDestinationLabel(viewPost.destinations)}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsTripMapOpen(false)}
-                aria-label="Close map"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition active:bg-slate-200"
-              >
-                <IconX className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="relative flex-1">
-              <TripDestinationsMap points={tripMapPoints} />
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

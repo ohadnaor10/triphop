@@ -1,9 +1,10 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type SubmitEvent } from "react";
 import { flushSync } from "react-dom";
-import { IconPlus } from "./components/icons";
+import { IconPlus, IconX } from "./components/icons";
 import turfBbox from "@turf/bbox";
 import turfDifference from "@turf/difference";
 import turfUnion from "@turf/union";
@@ -44,6 +45,13 @@ import {
 } from "./lib/mapStore";
 import { usePostsStore, type PostsFilters } from "./lib/postsStore";
 import { useClerkSupabaseClient } from "./lib/supabase/useClerkSupabaseClient";
+
+const TripDestinationsMap = dynamic(() => import("./components/TripDestinationsMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-sm text-slate-400">Loading map…</div>
+  ),
+});
 
 // ---------- Domain types ----------
 
@@ -681,6 +689,11 @@ function HomePageContent() {
   // thing "back" should never do. See the profile overlay near the other modals below.
   const [viewUserId, setViewUserId] = useState<string | null>(null);
   const [isTripMapOpen, setIsTripMapOpen] = useState(false);
+  // Latches on first open and never resets: like hasOpenedMap below, this keeps the "Show
+  // Trip Map" view mounted (hidden behind the closed modal) rather than tearing it down —
+  // and its one Mapbox map with it — every time the modal closes. Without this, opening
+  // a trip map ten times across a session cost ten separate billed map loads.
+  const [hasOpenedTripMap, setHasOpenedTripMap] = useState(false);
   const [tripMapPoints, setTripMapPoints] = useState<GeoPoint[]>([]);
   const [showSavedOnly, setShowSavedOnly] = useState(false);
 
@@ -1026,6 +1039,16 @@ function HomePageContent() {
   if (viewPostId !== revealedForPostId) {
     setRevealedForPostId(viewPostId);
     setRevealedContact(null);
+  }
+
+  // Same idiom, for the trip map: it used to close for free whenever the post underneath
+  // it unmounted, since it lived inside PostDetailView. Now that it's mounted separately
+  // (hasOpenedTripMap above), leaving isTripMapOpen untouched would carry "trip map was
+  // open" over to whatever post gets viewed next, popping it open unrequested.
+  const [tripMapOpenForPostId, setTripMapOpenForPostId] = useState<string | null>(null);
+  if (viewPostId !== tripMapOpenForPostId) {
+    setTripMapOpenForPostId(viewPostId);
+    setIsTripMapOpen(false);
   }
 
   useEffect(() => {
@@ -1880,16 +1903,48 @@ function HomePageContent() {
           revealContact={revealContact}
           setRevealedContact={setRevealedContact}
           onClose={() => setViewPostId(null)}
-          isTripMapOpen={isTripMapOpen}
-          setIsTripMapOpen={setIsTripMapOpen}
-          tripMapPoints={tripMapPoints}
+          setIsTripMapOpen={(open) => {
+            // Latches hasOpenedTripMap on first open and never resets it — see its
+            // declaration above for why: the map stays mounted (hidden) from here on
+            // rather than costing a fresh Mapbox map load every time this reopens.
+            if (open) setHasOpenedTripMap(true);
+            setIsTripMapOpen(open);
+          }}
           vibeStyles={VIBE_STYLES}
           initials={initials}
           formatGender={formatGender}
           formatRelativeTime={formatRelativeTime}
           getDateLabel={getDateLabel}
-          getDestinationLabel={getDestinationLabel}
         />
+      )}
+
+      {/* Trip Map modal — mounted from here (not from PostDetailView) so hasOpenedTripMap
+          can keep it, and its Mapbox map, alive across that view unmounting. Visible only
+          while both a post is open and its trip map was requested; closing either has to
+          hide it, or it would stay pinned on screen after the post underneath it closes. */}
+      {hasOpenedTripMap && (
+        <div className={isTripMapOpen && viewPost ? "" : "hidden"}>
+          <div className="fixed inset-0 z-[1300] flex flex-col bg-white sm:items-center sm:justify-center sm:bg-slate-900/40 sm:p-4">
+            <div className="flex h-full w-full max-w-lg flex-col overflow-hidden bg-white sm:h-[80dvh] sm:rounded-3xl sm:shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <h2 className="min-w-0 truncate text-sm font-bold text-slate-900">
+                  {viewPost ? getDestinationLabel(viewPost.destinations) : ""}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setIsTripMapOpen(false)}
+                  aria-label="Close map"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition active:bg-slate-200"
+                >
+                  <IconX className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="relative flex-1">
+                <TripDestinationsMap points={tripMapPoints} isVisible={isTripMapOpen && Boolean(viewPost)} />
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {viewUserId && (
