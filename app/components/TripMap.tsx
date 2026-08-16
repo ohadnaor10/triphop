@@ -21,7 +21,7 @@ const TRIP_LINK_LAYER = `${TRIP_LINK_SOURCE_ID}-line`;
 // How far out the map can be zoomed. Below this the whole globe (and then copies of it)
 // fits on screen, where every marker collapses into a handful of meaningless blobs and
 // panning stops meaning anything — so the camera simply doesn't go there.
-const MIN_ZOOM = 2;
+const MIN_ZOOM = 1.5;
 // A focused post with a single destination has no extent to fit either — close enough to
 // place the city in its surroundings, not so close that all context is lost.
 const SINGLE_PLACE_FOCUS_ZOOM = 9;
