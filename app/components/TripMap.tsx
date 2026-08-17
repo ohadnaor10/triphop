@@ -31,6 +31,37 @@ const DIMMED_MARKER_OPACITY = 0.6;
 // cluster ever be broken apart?" is decided.
 const MAX_ZOOM = 18;
 
+// Round-trip error above which a coordinate is taken to be on the far side of the globe.
+// A front-facing point comes back within centimetres; a back-facing one comes back on the
+// other hemisphere, thousands of kilometres out. Nothing lands in between.
+const OCCLUSION_TOLERANCE_METERS = 1000;
+
+/**
+ * Whether the globe itself is between the camera and this coordinate.
+ *
+ * mapbox/streets-v12 declares `projection: globe`, so below zoom 6 the map is a sphere and
+ * a marker on its far side still *projects* onto the visible disc — Mapbox hides those
+ * (Marker._evaluateOpacity) rather than let faces show through the planet. It does that on
+ * a 60ms timer after the marker is added, though, and `.mapboxgl-marker` ships
+ * `opacity: 1; transition: opacity .2s`: a marker created behind the globe therefore paints
+ * at full strength for ~60ms and then dissolves over another 200ms. Rebuilding the marker
+ * layer flashed a screenful of faces that way, every time.
+ *
+ * Asking the question ourselves lets a new marker's *first* painted frame already be right.
+ * Round-tripping through the screen answers it without touching Mapbox's private method:
+ * the pixel a far-side coordinate lands on belongs to the near-side surface, so unprojecting
+ * it gives back somewhere else entirely. On a flat projection the round trip is the identity,
+ * so this is simply false above zoom 6.
+ */
+function isBehindGlobe(map: mapboxgl.Map, lngLat: [number, number]): boolean {
+  const point = map.project(lngLat);
+  const canvas = map.getCanvas();
+  // Mapbox leaves off-screen markers' opacity untouched, so matching that here keeps a
+  // marker created just outside the viewport from fading in when it is panned into view.
+  if (point.x < 0 || point.y < 0 || point.x > canvas.clientWidth || point.y > canvas.clientHeight) return false;
+  return map.unproject(point).distanceTo(new mapboxgl.LngLat(lngLat[0], lngLat[1])) > OCCLUSION_TOLERANCE_METERS;
+}
+
 type BoundaryFeature = GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
 
 function toBoundaryFeatureCollection(countryCodes: string[]): GeoJSON.FeatureCollection<
@@ -165,6 +196,35 @@ function createBubbleElement(cluster: MapCluster, dimmed = false): HTMLDivElemen
   return outer;
 }
 
+type MarkerEntry = {
+  marker: mapboxgl.Marker;
+  /** Everything the element was drawn from — a different signature means it has to be redrawn. */
+  signature: string;
+  /**
+   * Re-pointed on every reuse and read inside the click handler, rather than captured by
+   * it. A cluster keeps its key while its membership shifts underneath (the same knot of
+   * cities, one more post in it), and a handler holding the old object would open the
+   * wrong list.
+   */
+  cluster: MapCluster | null;
+};
+
+// Everything createAvatarElement/createBubbleElement look at. Two clusters agreeing on all
+// of it draw identically, so the marker already on the map is still correct.
+function clusterSignature(cluster: MapCluster, focused: boolean, dimmed: boolean): string {
+  return [
+    cluster.postId ?? "",
+    cluster.label,
+    cluster.postCount,
+    cluster.isGhost ? "ghost" : "",
+    cluster.author?.name ?? "",
+    cluster.author?.avatarUrl ?? "",
+    cluster.author?.avatarColor ?? "",
+    focused ? "focused" : "",
+    dimmed ? "dimmed" : "",
+  ].join("|");
+}
+
 export type TripMapProps = {
   /**
    * False while the map is mounted but hidden (the feed is showing). A hidden container
@@ -234,7 +294,9 @@ export default function TripMap({
 }: TripMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
-  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  // Keyed rather than a plain list so a render can reuse the markers that did not change —
+  // see the marker effect for why throwing the whole layer away was visible on screen.
+  const markersRef = useRef(new Map<string, MarkerEntry>());
 
   // Callbacks live in refs so the map/listener effects can stay mounted for the map's
   // whole lifetime: re-running them on every render would tear down and rebuild the
@@ -336,15 +398,92 @@ export default function TripMap({
     );
   }, [initialBounds, isStyleLoaded, isVisible]);
 
+  // Reconciled against what is already on the map, never rebuilt wholesale. Removing every
+  // marker and placing a fresh set is the obvious way to write this and it is what made
+  // pans and zooms flash: a brand-new marker element starts at `.mapboxgl-marker`'s
+  // `opacity: 1` and does not get its real, occlusion-aware opacity until Mapbox's 60ms
+  // timer fires, so on the globe every face hidden behind the planet reappeared at full
+  // strength and then faded back out over the class's 0.2s transition. Reusing the
+  // unchanged markers also keeps their avatar images decoded instead of re-decoding a
+  // screenful of <img> elements after every gesture.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !isStyleLoaded) return;
 
-    // Always clear the previous render's markers before placing new ones — otherwise a
-    // marker that drops out of `clusters` (panned away, filtered out, or merged into a
-    // neighbour) would be left stranded on the map.
-    markersRef.current.forEach((m) => m.remove());
-    const markers: mapboxgl.Marker[] = [];
+    const previous = markersRef.current;
+    const next = new Map<string, MarkerEntry>();
+
+    const place = (
+      key: string,
+      signature: string,
+      lngLat: [number, number],
+      anchor: "center" | "bottom",
+      cluster: MapCluster | null,
+      build: () => HTMLDivElement,
+    ) => {
+      // Keys are unique per render by construction, but two post_places rows on one exact
+      // coordinate would collide — and the loser of that collision would be a marker on the
+      // map that no later sweep could ever find again. Dropping it heals on the next render;
+      // leaking it does not.
+      if (next.has(key)) return;
+
+      const reused = previous.get(key);
+      if (reused && reused.signature === signature) {
+        // Claimed, so the sweep below leaves it alone. The cluster is re-pointed rather
+        // than captured by the click handler, so a reused element can never act on the
+        // membership it was originally built for.
+        previous.delete(key);
+        reused.cluster = cluster;
+        reused.marker.setLngLat(lngLat);
+        next.set(key, reused);
+        return;
+      }
+
+      const element = build();
+      // See isBehindGlobe: the first painted frame has to be right on its own, because
+      // Mapbox does not weigh in on a new marker's opacity for another 60ms.
+      if (isBehindGlobe(map, lngLat)) element.style.opacity = "0";
+
+      const entry: MarkerEntry = {
+        marker: new mapboxgl.Marker({ element, anchor }).setLngLat(lngLat).addTo(map),
+        signature,
+        cluster,
+      };
+
+      element.addEventListener("click", (e) => {
+        const current = entry.cluster;
+        if (!current) return;
+        e.stopPropagation();
+        if (current.postId) {
+          onSelectPostRef.current(current.postId);
+          return;
+        }
+
+        // Zooming only helps if the members would actually come apart at maximum zoom.
+        // Otherwise the tap is a dead end — the user zooms, the bubble stays whole, and
+        // the posts inside it are unreachable. Those open a list instead.
+        if (!canSplitByZooming(current, MAX_ZOOM)) {
+          onOpenClusterListRef.current(current);
+          return;
+        }
+        const [minLng, minLat, maxLng, maxLat] = current.bounds;
+        // Fit the cluster's own extent rather than stepping a fixed amount: a tight knot
+        // of towns needs far more zoom than a loose pair of cities, and one fixed step
+        // gets both wrong.
+        map.fitBounds(
+          [
+            [minLng, minLat],
+            [maxLng, maxLat],
+          ],
+          { padding: 80, maxZoom: MAX_ZOOM, duration: 700, essential: true },
+        );
+      });
+
+      // Deliberately not claiming the key from `previous`: if an entry under this key is
+      // still there its signature differed, which means it is the outdated drawing of this
+      // same marker and the sweep has to take it off the map.
+      next.set(key, entry);
+    };
 
     // Focus mode: the focused post gets its own labelled pins so its trip reads on its
     // own, drawn on top of everything else rather than in place of it. Keyed on the
@@ -352,11 +491,10 @@ export default function TripMap({
     // all and still gets labelled pins skipped — for those, the country shading below is
     // what makes the focus visible.
     if (focusedPostId) {
-      for (const place of focusedPlaces) {
-        markers.push(
-          new mapboxgl.Marker({ element: createLabelledPinElement(place), anchor: "bottom" })
-            .setLngLat([place.lng, place.lat])
-            .addTo(map),
+      for (const spot of focusedPlaces) {
+        const key = `pin:${spot.lng},${spot.lat}`;
+        place(key, `${key}|${spot.label}`, [spot.lng, spot.lat], "bottom", null, () =>
+          createLabelledPinElement(spot),
         );
       }
     }
@@ -370,54 +508,39 @@ export default function TripMap({
       // A cluster of one is a single post — drawn as its author's avatar, and tapping it
       // opens that post rather than zooming into it.
       const isSinglePost = cluster.postId !== null;
+      const focused = cluster.postId === focusedPostId;
       // Dimmed, not hidden, while a trip is focused: DIMMED_MARKER_OPACITY keeps the rest
       // of the map legible as context instead of vanishing every other traveler.
       const dimmed = Boolean(focusedPostId);
-      const element = isSinglePost
-        ? createAvatarElement(cluster, cluster.postId === focusedPostId, dimmed)
-        : createBubbleElement(cluster, dimmed);
-
-      element.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (isSinglePost && cluster.postId) {
-          onSelectPostRef.current(cluster.postId);
-          return;
-        }
-
-        // Zooming only helps if the members would actually come apart at maximum zoom.
-        // Otherwise the tap is a dead end — the user zooms, the bubble stays whole, and
-        // the posts inside it are unreachable. Those open a list instead.
-        if (!canSplitByZooming(cluster, MAX_ZOOM)) {
-          onOpenClusterListRef.current(cluster);
-          return;
-        }
-        const [minLng, minLat, maxLng, maxLat] = cluster.bounds;
-        // Fit the cluster's own extent rather than stepping a fixed amount: a tight knot
-        // of towns needs far more zoom than a loose pair of cities, and one fixed step
-        // gets both wrong.
-        map.fitBounds(
-          [
-            [minLng, minLat],
-            [maxLng, maxLat],
-          ],
-          { padding: 80, maxZoom: MAX_ZOOM, duration: 700, essential: true },
-        );
-      });
-
-      markers.push(
-        new mapboxgl.Marker({ element, anchor: "center" })
-          .setLngLat([cluster.lng, cluster.lat])
-          .addTo(map),
+      place(
+        `cluster:${cluster.key}`,
+        clusterSignature(cluster, focused, dimmed),
+        [cluster.lng, cluster.lat],
+        "center",
+        cluster,
+        () =>
+          isSinglePost
+            ? createAvatarElement(cluster, focused, dimmed)
+            : createBubbleElement(cluster, dimmed),
       );
     }
 
-    markersRef.current = markers;
-
-    return () => {
-      markersRef.current.forEach((m) => m.remove());
-      markersRef.current = [];
-    };
+    // Whatever went unclaimed is a marker that dropped out of `clusters` — panned away,
+    // filtered out, merged into a neighbour, or redrawn above under a new signature.
+    for (const stale of previous.values()) stale.marker.remove();
+    markersRef.current = next;
   }, [clusters, focusedPlaces, focusedPostId, isStyleLoaded]);
+
+  // Teardown belongs on unmount alone. As an effect cleanup it would run before every
+  // re-render of the effect above, which is exactly the wholesale rebuild that reconciling
+  // exists to avoid.
+  useEffect(
+    () => () => {
+      markersRef.current.forEach((entry) => entry.marker.remove());
+      markersRef.current = new Map();
+    },
+    [],
+  );
 
   // Frames the focused post: all of its destinations at once, since a trip's cities are
   // routinely spread far enough apart that the one that was tapped says nothing about
